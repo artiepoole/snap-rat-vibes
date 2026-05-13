@@ -6,6 +6,16 @@ Rust bindings for snapd. This allows applications in Rust to talk directly to sn
 
 We use AI to generate the endpoint implementations and Rust types.
 
+## snap-rat
+
+In <img width="1920" height="1097" alt="image (3)" src="https://github.com/user-attachments/assets/1d7f01f1-8854-4d7f-8815-54fb61a04803" />
+<img width="1920" height="1097" alt="image (2)" src="https://github.com/user-attachments/assets/76c83573-05a1-4982-b394-c20af9fcea90" />
+<img width="1920" height="1097" alt="image (1)" src="https://github.com/user-attachments/assets/f500c79a-4e77-4f38-afa8-7f1ffd7beae9" />
+
+
+<img width="1920" height="1151" alt="image" src="https://github.com/user-attachments/assets/958d968b-c8e3-478d-b126-4dbfbe523b1e" />
+
+
 ## setup
 For megademo.ai. The agent has access to snapd source, so please use
 ```
@@ -52,3 +62,4 @@ workshop launch
 ```
 
 To see the list of all workshop quick actions, see `workshop.yaml`.
+
