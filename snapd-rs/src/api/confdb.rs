@@ -1,10 +1,12 @@
-use serde_json::Value;
+use std::collections::HashMap;
+
+use serde_json::{Value, json};
 
 use crate::{client::SnapdClient, error::Result, types::ChangeId};
 
 impl SnapdClient {
-    pub async fn get_confdb(&self, account: &str, schema: &str, view: &str) -> Result<Value> {
-        self.get(&format!("/v2/confdb/{account}/{schema}/{view}"))
+    pub async fn get_confdb(&self, account: &str, schema: &str, view: &str) -> Result<ChangeId> {
+        self.get_async(&format!("/v2/confdb/{account}/{schema}/{view}"))
             .await
     }
 
@@ -13,9 +15,12 @@ impl SnapdClient {
         account: &str,
         schema: &str,
         view: &str,
-        values: Value,
+        values: HashMap<String, Value>,
     ) -> Result<ChangeId> {
-        self.put(&format!("/v2/confdb/{account}/{schema}/{view}"), &values)
-            .await
+        self.put_async(
+            &format!("/v2/confdb/{account}/{schema}/{view}"),
+            &json!({ "values": values }),
+        )
+        .await
     }
 }

@@ -144,8 +144,10 @@ pub enum ValidationSetMode {
 pub enum NoticeType {
     SnapRunInhibit,
     InterfacesRequestsPrompt,
+    InterfacesRequestsRuleUpdate,
     ChangeUpdate,
     Warning,
+    RefreshInhibit,
 }
 
 /// Prompt rule outcome.

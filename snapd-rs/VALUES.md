@@ -131,8 +131,10 @@ The type of a notice event.
 |------------|--------------|-------------|
 | `"snap-run-inhibit"` | `SnapRunInhibit` | A snap is inhibited from running |
 | `"interfaces-requests-prompt"` | `InterfacesRequestsPrompt` | An interface access prompt is pending |
+| `"interfaces-requests-rule-update"` | `InterfacesRequestsRuleUpdate` | A prompting rule was created/changed/removed |
 | `"change-update"` | `ChangeUpdate` | An async change has been updated |
 | `"warning"` | `Warning` | A warning has been issued |
+| `"refresh-inhibit"` | `RefreshInhibit` | An auto-refresh is inhibited |
 
 Used in: `Notice.type_`
 
@@ -159,3 +161,44 @@ How long a prompt rule or reply should remain in effect.
 | `"timespan"` | `Timespan` | Applies until a specified expiration time |
 
 Used in: `PromptRule.lifespan`, `reply_to_prompt()`
+
+## ThemeStatusKind
+
+Availability status for a requested theme.
+
+| JSON value | Rust variant | Description |
+|------------|--------------|-------------|
+| `"installed"` | `Installed` | Theme is already installed |
+| `"available"` | `Available` | Theme is available to install |
+| `"unavailable"` | `Unavailable` | Theme is not available |
+
+Used in: `ThemeStatus.gtk_themes`, `ThemeStatus.icon_themes`, `ThemeStatus.sound_themes`
+
+## FdeStatus
+
+Disk encryption activation status for the current boot.
+
+| JSON value | Rust variant |
+|------------|--------------|
+| `"indeterminate"` | `Indeterminate` |
+| `"active"` | `Active` |
+| `"inactive"` | `Inactive` |
+| `"recovery"` | `Recovery` |
+| `"degraded"` | `Degraded` |
+
+Used in: `StorageEncryptionStatus.status`
+
+## AutoRepairResult
+
+Auto-repair outcome for storage encryption.
+
+| JSON value | Rust variant |
+|------------|--------------|
+| `"not-initialized"` | `NotInitialized` |
+| `"not-attempted"` | `NotAttempted` |
+| `"failed-platform-init"` | `FailedPlatformInit` |
+| `"failed-keyslots"` | `FailedKeyslots` |
+| `"failed-encryption-support"` | `FailedEncryptionSupport` |
+| `"success"` | `Success` |
+
+Used in: `StorageEncryptionStatus.auto_repair_result`

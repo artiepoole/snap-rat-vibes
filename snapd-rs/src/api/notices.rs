@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::{client::SnapdClient, error::Result, types::NoticeType};
 
@@ -15,7 +17,8 @@ pub struct Notice {
     pub last_occurred: String,
     pub last_repeated: Option<String>,
     pub occurrences: u64,
-    pub last_data: Value,
+    #[serde(default)]
+    pub last_data: HashMap<String, String>,
     pub expire_after: Option<String>,
     pub repeat_after: Option<String>,
 }
@@ -38,7 +41,7 @@ impl SnapdClient {
         &self,
         notice_type: NoticeType,
         key: &str,
-        data: Option<Value>,
+        data: Option<HashMap<String, String>>,
     ) -> Result<String> {
         let response: AddNoticeResponse = self
             .post_sync(

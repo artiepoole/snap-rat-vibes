@@ -129,6 +129,11 @@ impl SnapdClient {
         self.execute_sync(req).await
     }
 
+    pub(crate) async fn get_async(&self, path: &str) -> Result<ChangeId> {
+        let req = self.build_request(Method::GET, path, Bytes::new(), None)?;
+        self.execute_async(req).await
+    }
+
     pub(crate) async fn post_sync<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,
@@ -168,6 +173,17 @@ impl SnapdClient {
             Some("application/json"),
         )?;
         self.execute_sync(req).await
+    }
+
+    pub(crate) async fn put_async<B: Serialize>(&self, path: &str, body: &B) -> Result<ChangeId> {
+        let payload = serde_json::to_vec(body)?;
+        let req = self.build_request(
+            Method::PUT,
+            path,
+            Bytes::from(payload),
+            Some("application/json"),
+        )?;
+        self.execute_async(req).await
     }
 
     pub(crate) async fn post_raw_sync<T: DeserializeOwned>(

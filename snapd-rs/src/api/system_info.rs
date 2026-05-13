@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::{client::SnapdClient, error::Result, types::SystemMode};
 
@@ -16,22 +16,46 @@ pub struct SystemInfo {
     pub managed: Option<bool>,
     pub kernel_version: Option<String>,
     pub system_mode: Option<SystemMode>,
-    pub sandbox_features: Option<Value>,
+    pub sandbox_features: Option<HashMap<String, Vec<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FdeStatus {
+    Indeterminate,
+    Active,
+    Inactive,
+    Recovery,
+    Degraded,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoRepairResult {
+    NotInitialized,
+    NotAttempted,
+    FailedPlatformInit,
+    FailedKeyslots,
+    FailedEncryptionSupport,
+    Success,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct StorageEncryptionStatus {
-    #[serde(flatten)]
-    pub details: HashMap<String, Value>,
+    pub status: FdeStatus,
+    pub auto_repair_result: AutoRepairResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Warning {
     pub message: String,
-    pub first_seen: String,
-    pub last_seen: String,
+    pub first_added: String,
+    pub last_added: String,
+    pub last_shown: Option<String>,
     pub expire_after: Option<String>,
+    pub repeat_after: Option<String>,
 }
 
 impl SnapdClient {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::{
     client::SnapdClient,
@@ -11,13 +11,14 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasStatus {
-    pub snap: String,
     pub command: String,
     pub status: AliasStatusKind,
+    pub manual: Option<String>,
+    pub auto: Option<String>,
 }
 
 impl SnapdClient {
-    pub async fn list_aliases(&self) -> Result<HashMap<String, Value>> {
+    pub async fn list_aliases(&self) -> Result<HashMap<String, HashMap<String, AliasStatus>>> {
         self.get("/v2/aliases").await
     }
 

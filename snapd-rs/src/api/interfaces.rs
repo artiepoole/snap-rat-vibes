@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -20,7 +22,7 @@ pub struct Plug {
     pub snap: Option<String>,
     pub plug: String,
     pub interface: Option<String>,
-    pub attrs: Option<Value>,
+    pub attrs: Option<HashMap<String, Value>>,
     pub label: Option<String>,
 }
 
@@ -29,7 +31,7 @@ pub struct Slot {
     pub snap: Option<String>,
     pub slot: String,
     pub interface: Option<String>,
-    pub attrs: Option<Value>,
+    pub attrs: Option<HashMap<String, Value>>,
     pub label: Option<String>,
 }
 
@@ -40,6 +42,8 @@ pub struct Connection {
     pub interface: Option<String>,
     pub gadget: Option<bool>,
     pub manual: Option<bool>,
+    pub slot_attrs: Option<HashMap<String, Value>>,
+    pub plug_attrs: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,12 +58,24 @@ pub struct SlotRef {
     pub slot: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Connections {
+    #[serde(default)]
+    pub established: Vec<Connection>,
+    #[serde(default)]
+    pub undesired: Vec<Connection>,
+    #[serde(default)]
+    pub plugs: Vec<Plug>,
+    #[serde(default)]
+    pub slots: Vec<Slot>,
+}
+
 impl SnapdClient {
     pub async fn list_interfaces(&self) -> Result<Vec<Interface>> {
         self.get("/v2/interfaces?select=connected").await
     }
 
-    pub async fn list_connections(&self) -> Result<Vec<Connection>> {
+    pub async fn list_connections(&self) -> Result<Connections> {
         self.get("/v2/connections").await
     }
 
