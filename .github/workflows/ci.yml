@@ -1,7 +1,7 @@
 name: CI - snapd-rs Tests
 # Automated testing and quality checks
 
-on:
+'on':
   pull_request:
     branches:
       - main
