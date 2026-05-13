@@ -1,0 +1,40 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'copilot/**'
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+
+jobs:
+  unit-tests:
+    name: snapd-rs unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+          prefix-key: v0-rust
+          add-job-id-key: true
+
+      - name: Run unit tests
+        run: cargo test -p snapd-rs --lib
