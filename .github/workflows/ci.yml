@@ -1,0 +1,158 @@
+name: CI - snapd-rs Tests
+# Automated testing and quality checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'doardo/**'
+      - 'artie/**'
+    paths:
+      - 'snapd-rs/**'
+      - '.github/workflows/ci.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Run tests
+        working-directory: snapd-rs
+        run: cargo test --lib --test '*' --verbose
+        continue-on-error: ${{ matrix.rust == 'beta' }}
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Run integration tests
+        working-directory: snapd-rs
+        run: cargo test --test integration_tests -- --nocapture --test-threads=1
+      
+      - name: Display test output
+        if: failure()
+        working-directory: snapd-rs
+        run: cargo test --test integration_tests -- --nocapture --test-threads=1 2>&1
+
+  lint:
+    name: Formatting & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Check formatting
+        working-directory: snapd-rs
+        run: cargo fmt -- --check
+      
+      - name: Run clippy lints
+        working-directory: snapd-rs
+        run: cargo clippy --all-targets --all-features 2>&1 || true
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      
+      - name: Generate coverage
+        working-directory: snapd-rs
+        run: cargo tarpaulin --out Xml --exclude-files tests/ --timeout 300
+      
+      - name: Upload to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./snapd-rs/cobertura.xml
+          fail_ci_if_error: false
+          verbose: true
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - nightly
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Check compilation
+        working-directory: snapd-rs
+        run: cargo check --all-features --verbose
+        continue-on-error: ${{ matrix.rust == 'nightly' }}
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snapd-rs
+      
+      - name: Generate documentation
+        working-directory: snapd-rs
+        run: cargo doc --no-deps --verbose
+        env:
+          RUSTDOCFLAGS: -D warnings

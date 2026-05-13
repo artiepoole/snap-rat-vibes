@@ -25,18 +25,18 @@ impl SnapdClient {
         .await
     }
 
-    pub async fn restore_snapshot(&self, id: u64, snaps: &[&str]) -> Result<ChangeId> {
+    pub async fn restore_snapshot(&self, set_id: u64, snaps: &[&str]) -> Result<ChangeId> {
         self.post_async(
             "/v2/snapshots",
-            &json!({ "action": "restore", "id": id, "snaps": snaps }),
+            &json!({ "action": "restore", "set": set_id, "snaps": snaps }),
         )
         .await
     }
 
-    pub async fn forget_snapshot(&self, id: u64, snaps: &[&str]) -> Result<ChangeId> {
+    pub async fn forget_snapshot(&self, set_id: u64, snaps: &[&str]) -> Result<ChangeId> {
         self.post_async(
             "/v2/snapshots",
-            &json!({ "action": "forget", "id": id, "snaps": snaps }),
+            &json!({ "action": "forget", "set": set_id, "snaps": snaps }),
         )
         .await
     }

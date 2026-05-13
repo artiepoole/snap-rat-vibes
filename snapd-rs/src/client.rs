@@ -105,31 +105,27 @@ impl SnapdClient {
         Ok(sender.send_request(req).await?)
     }
 
-    fn build_empty_request(&self, method: Method, path: &str) -> Result<Request<Full<Bytes>>> {
-        Ok(Request::builder()
-            .method(method)
-            .uri(path)
-            .header(HOST, "localhost")
-            .body(Full::new(Bytes::new()))?)
-    }
-
-    fn build_json_request<B: Serialize>(
+    fn build_request(
         &self,
         method: Method,
         path: &str,
-        body: &B,
+        body: Bytes,
+        content_type: Option<&str>,
     ) -> Result<Request<Full<Bytes>>> {
-        let payload = serde_json::to_vec(body)?;
-        Ok(Request::builder()
+        let mut builder = Request::builder()
             .method(method)
             .uri(path)
-            .header(HOST, "localhost")
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::new(Bytes::from(payload)))?)
+            .header(HOST, "localhost");
+
+        if let Some(ct) = content_type {
+            builder = builder.header(CONTENT_TYPE, ct);
+        }
+
+        Ok(builder.body(Full::new(body))?)
     }
 
     pub(crate) async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let req = self.build_empty_request(Method::GET, path)?;
+        let req = self.build_request(Method::GET, path, Bytes::new(), None)?;
         self.execute_sync(req).await
     }
 
@@ -138,12 +134,24 @@ impl SnapdClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
-        let req = self.build_json_request(Method::POST, path, body)?;
+        let payload = serde_json::to_vec(body)?;
+        let req = self.build_request(
+            Method::POST,
+            path,
+            Bytes::from(payload),
+            Some("application/json"),
+        )?;
         self.execute_sync(req).await
     }
 
     pub(crate) async fn post_async<B: Serialize>(&self, path: &str, body: &B) -> Result<ChangeId> {
-        let req = self.build_json_request(Method::POST, path, body)?;
+        let payload = serde_json::to_vec(body)?;
+        let req = self.build_request(
+            Method::POST,
+            path,
+            Bytes::from(payload),
+            Some("application/json"),
+        )?;
         self.execute_async(req).await
     }
 
@@ -152,7 +160,13 @@ impl SnapdClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
-        let req = self.build_json_request(Method::PUT, path, body)?;
+        let payload = serde_json::to_vec(body)?;
+        let req = self.build_request(
+            Method::PUT,
+            path,
+            Bytes::from(payload),
+            Some("application/json"),
+        )?;
         self.execute_sync(req).await
     }
 
@@ -162,12 +176,7 @@ impl SnapdClient {
         body: Bytes,
         content_type: &'static str,
     ) -> Result<T> {
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(path)
-            .header(HOST, "localhost")
-            .header(CONTENT_TYPE, content_type)
-            .body(Full::new(body))?;
+        let req = self.build_request(Method::POST, path, body, Some(content_type))?;
         self.execute_sync(req).await
     }
 
@@ -180,19 +189,7 @@ impl SnapdClient {
             ResponseType::Sync => Ok(serde_json::from_value(
                 envelope.result.unwrap_or(serde_json::Value::Null),
             )?),
-            ResponseType::Error => {
-                let error = match envelope.result {
-                    Some(value) => serde_json::from_value::<ErrorResult>(value)?,
-                    None => ErrorResult {
-                        message: envelope.status,
-                        kind: None,
-                    },
-                };
-                Err(Error::Snapd {
-                    kind: error.kind.unwrap_or_else(|| "unknown".to_string()),
-                    message: error.message,
-                })
-            }
+            ResponseType::Error => Err(self.parse_error(&envelope)),
             ResponseType::Async => Err(Error::UnexpectedResponseType("async".to_string())),
         }
     }
@@ -209,20 +206,29 @@ impl SnapdClient {
                     "async response missing change id".to_string(),
                 )),
             },
-            ResponseType::Error => {
-                let error = match envelope.result {
-                    Some(value) => serde_json::from_value::<ErrorResult>(value)?,
-                    None => ErrorResult {
-                        message: envelope.status,
+            ResponseType::Error => Err(self.parse_error(&envelope)),
+            ResponseType::Sync => Err(Error::UnexpectedResponseType("sync".to_string())),
+        }
+    }
+
+    fn parse_error(&self, envelope: &RawSnapdResponse) -> Error {
+        let error = match &envelope.result {
+            Some(value) => {
+                serde_json::from_value::<ErrorResult>(value.clone()).unwrap_or_else(|_| {
+                    ErrorResult {
+                        message: envelope.status.clone(),
                         kind: None,
-                    },
-                };
-                Err(Error::Snapd {
-                    kind: error.kind.unwrap_or_else(|| "unknown".to_string()),
-                    message: error.message,
+                    }
                 })
             }
-            ResponseType::Sync => Err(Error::UnexpectedResponseType("sync".to_string())),
+            None => ErrorResult {
+                message: envelope.status.clone(),
+                kind: None,
+            },
+        };
+        Error::Snapd {
+            kind: error.kind.unwrap_or_else(|| "unknown".to_string()),
+            message: error.message,
         }
     }
 }
