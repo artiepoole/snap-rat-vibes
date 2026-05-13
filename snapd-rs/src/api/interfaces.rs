@@ -24,6 +24,8 @@ pub struct Plug {
     pub interface: Option<String>,
     pub attrs: Option<HashMap<String, Value>>,
     pub label: Option<String>,
+    #[serde(default)]
+    pub connections: Vec<SlotRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,8 @@ pub struct Slot {
     pub interface: Option<String>,
     pub attrs: Option<HashMap<String, Value>>,
     pub label: Option<String>,
+    #[serde(default)]
+    pub connections: Vec<PlugRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,8 +79,32 @@ impl SnapdClient {
         self.get("/v2/interfaces?select=connected").await
     }
 
-    pub async fn list_connections(&self) -> Result<Connections> {
-        self.get("/v2/connections").await
+    pub async fn list_all_interfaces(&self) -> Result<Vec<Interface>> {
+        self.get("/v2/interfaces?plugs=true&slots=true&select=all")
+            .await
+    }
+
+    pub async fn list_snap_interfaces(&self, snap_name: &str) -> Result<Vec<Interface>> {
+        Ok(self
+            .list_all_interfaces()
+            .await?
+            .into_iter()
+            .filter(|interface| {
+                interface
+                    .plugs
+                    .iter()
+                    .any(|plug| plug.snap.as_deref() == Some(snap_name))
+                    || interface
+                        .slots
+                        .iter()
+                        .any(|slot| slot.snap.as_deref() == Some(snap_name))
+            })
+            .collect())
+    }
+
+    pub async fn list_connections(&self) -> Result<Vec<Connection>> {
+        let resp: Connections = self.get("/v2/connections").await?;
+        Ok(resp.established)
     }
 
     pub async fn connect_interface(

@@ -124,6 +124,12 @@ impl SnapdClient {
         Ok(builder.body(Full::new(body))?)
     }
 
+    pub(crate) async fn get_bytes(&self, path: &str) -> Result<Bytes> {
+        let req = self.build_request(Method::GET, path, Bytes::new(), None)?;
+        let response = self.send_request(req).await?;
+        Ok(response.into_body().collect().await?.to_bytes())
+    }
+
     pub(crate) async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let req = self.build_request(Method::GET, path, Bytes::new(), None)?;
         self.execute_sync(req).await

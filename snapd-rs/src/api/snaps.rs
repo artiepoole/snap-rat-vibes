@@ -9,6 +9,15 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub struct StoreAccount {
+    pub id: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub validation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Snap {
     pub id: Option<String>,
     pub title: Option<String>,
@@ -18,7 +27,7 @@ pub struct Snap {
     pub installed_size: Option<u64>,
     pub install_date: Option<String>,
     pub name: String,
-    pub publisher: Option<String>,
+    pub publisher: Option<StoreAccount>,
     pub developer: Option<String>,
     pub status: Option<SnapStatus>,
     #[serde(rename = "type")]
@@ -76,6 +85,22 @@ impl SnapdClient {
             &json!({
                 "action": "install",
                 "channel": channel,
+            }),
+        )
+        .await
+    }
+
+    pub async fn install_snap_classic(
+        &self,
+        name: &str,
+        channel: Option<&str>,
+    ) -> Result<ChangeId> {
+        self.post_async(
+            &format!("/v2/snaps/{name}"),
+            &json!({
+                "action": "install",
+                "channel": channel,
+                "classic": true,
             }),
         )
         .await

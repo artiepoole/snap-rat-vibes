@@ -31,8 +31,33 @@ pub struct ErrorResult {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ChangeId(pub String);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// Snap revision number. Serialized as a string in the snapd API (e.g. `"19"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Revision(pub i64);
+
+impl Serialize for Revision {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Revision {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        let n = if let Some(rest) = s.strip_prefix('x') {
+            rest.parse::<i64>().map(|n| -n)
+        } else {
+            s.parse::<i64>()
+        }
+        .map_err(serde::de::Error::custom)?;
+        Ok(Revision(n))
+    }
+}
 
 // --- Domain enums ---
 

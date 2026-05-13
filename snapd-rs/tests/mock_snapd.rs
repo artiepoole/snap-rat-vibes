@@ -130,7 +130,7 @@ fn handle_list_apps() -> String {
 
 /// HTTP response for GET /v2/snaps
 fn handle_list_snaps() -> String {
-    let body = r#"{"type":"sync","status-code":200,"status":"OK","result":[{"name":"test-snap","version":"1.0","status":"active","type":"app","channel":"","tracking-channel":"","revision":1}]}"#;
+    let body = r#"{"type":"sync","status-code":200,"status":"OK","result":[{"name":"test-snap","version":"1.0","status":"active","type":"app","channel":"","tracking-channel":"","revision":"1"}]}"#;
     http_response_ok(body)
 }
 

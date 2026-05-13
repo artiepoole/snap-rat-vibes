@@ -5,6 +5,7 @@ pub mod auth;
 pub mod changes;
 pub mod confdb;
 pub mod debug;
+pub mod icons;
 pub mod interfaces;
 pub mod model;
 pub mod notices;

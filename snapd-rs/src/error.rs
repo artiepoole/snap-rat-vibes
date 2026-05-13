@@ -18,4 +18,11 @@ pub enum Error {
     UnexpectedResponseType(String),
 }
 
+impl Error {
+    /// Returns true if this is a snapd error with the given kind string.
+    pub fn is_kind(&self, kind: &str) -> bool {
+        matches!(self, Error::Snapd { kind: k, .. } if k == kind)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

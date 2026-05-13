@@ -9,6 +9,10 @@ pub struct Change {
     pub kind: String,
     pub summary: String,
     pub status: ChangeStatus,
+    #[serde(rename = "spawn-time")]
+    pub spawn_time: Option<String>,
+    #[serde(rename = "ready-time")]
+    pub ready_time: Option<String>,
     #[serde(default)]
     pub tasks: Vec<Task>,
     pub err: Option<String>,
@@ -33,6 +37,10 @@ pub struct TaskProgress {
 impl SnapdClient {
     pub async fn list_changes(&self) -> Result<Vec<Change>> {
         self.get("/v2/changes").await
+    }
+
+    pub async fn list_all_changes(&self) -> Result<Vec<Change>> {
+        self.get("/v2/changes?select=all").await
     }
 
     pub async fn get_change(&self, id: &str) -> Result<Change> {
