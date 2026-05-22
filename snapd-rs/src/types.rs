@@ -202,10 +202,7 @@ impl<'de> Deserialize<'de> for NoticeType {
     {
         let value = String::deserialize(deserializer)?;
         Self::from_str(&value).map_err(|_| {
-            serde::de::Error::unknown_variant(
-                &value,
-                &<NoticeType as strum::VariantNames>::VARIANTS,
-            )
+            serde::de::Error::unknown_variant(&value, <NoticeType as strum::VariantNames>::VARIANTS)
         })
     }
 }

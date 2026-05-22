@@ -1,5 +1,4 @@
 name: Unit Tests
-
 on:
   push:
     branches:
@@ -12,7 +11,6 @@ on:
       - reopened
       - ready_for_review
       - converted_to_draft
-
 jobs:
   unit-tests:
     name: snapd-rs unit tests
@@ -25,16 +23,13 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: snapd-rs
           prefix-key: v0-rust
           add-job-id-key: true
-
       - name: Run unit tests
         run: cargo test -p snapd-rs --lib

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use image::DynamicImage;
 use ratatui::{layout::Rect, widgets::ListState};
-use ratatui_image::picker::{Capability, Picker, ProtocolType, cap_parser::QueryStdioOptions};
+use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
 use snapd_rs::{
     Change, ChannelSnapInfo, SnapdClient, StoreSnap,
     api::{
@@ -12,7 +12,7 @@ use snapd_rs::{
     },
 };
 
-use crate::DisplaySnap;
+use crate::types::DisplaySnap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -37,6 +37,13 @@ pub enum ConfirmPending {
     Action(ManageAction),
     Connect,
     Disconnect,
+    /// Auto-connect a plug to a system slot after install.
+    AutoConnect {
+        plug_snap: String,
+        plug_name: String,
+        interface_name: String,
+        slot: SlotRef,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,12 +69,14 @@ impl SortMode {
 pub enum ManageAction {
     Install,
     InstallFromChannel,
+    InstallLocalFile,
     Refresh,
     SwitchChannel,
     Revert,
     Enable,
     Disable,
     Uninstall,
+    UninstallPurge,
     OpenStorePage,
     OpenContactPage,
 }
@@ -77,12 +86,14 @@ impl ManageAction {
         match self {
             ManageAction::Install => "Install",
             ManageAction::InstallFromChannel => "Install from channel…",
+            ManageAction::InstallLocalFile => "Install from local file",
             ManageAction::Refresh => "Refresh to latest",
             ManageAction::SwitchChannel => "Switch channel…",
             ManageAction::Revert => "Revert to previous version",
             ManageAction::Enable => "Enable",
             ManageAction::Disable => "Disable",
             ManageAction::Uninstall => "Uninstall",
+            ManageAction::UninstallPurge => "Uninstall and purge data",
             ManageAction::OpenStorePage => "Open store page",
             ManageAction::OpenContactPage => "Open contact page",
         }
@@ -111,6 +122,7 @@ pub struct App {
     pub client: SnapdClient,
     pub installed: Vec<Snap>,
     pub store_results: Vec<StoreSnap>,
+    pub local_file_results: Vec<DisplaySnap>,
     pub search_query: String,
     pub search_focused: bool,
     pub list_state: ListState,
@@ -131,6 +143,10 @@ pub struct App {
     pub connections_activated: bool,
     pub active_change_id: Option<String>,
     pub active_change: Option<Change>,
+    /// The action that started the current active change (used to trigger post-install prompts).
+    pub active_change_action: Option<ManageAction>,
+    /// The snap name the active change is operating on.
+    pub active_change_snap: Option<String>,
     pub show_changes_sidebar: bool,
     pub show_help: bool,
     pub sidebar_changes: Vec<Change>,
@@ -146,6 +162,8 @@ pub struct App {
     pub pending_channel_action: Option<ManageAction>,
     /// Snap name / channel waiting for classic confirmation.
     pub classic_pending: Option<(String, Option<String>)>,
+    /// Path of a local snap file waiting for classic confirmation.
+    pub classic_local_path: Option<String>,
     /// Name of the snap currently open in the manage panel.
     /// Persists through close_manage so reload() can restore the selection.
     pub managed_snap_name: Option<String>,
@@ -169,6 +187,8 @@ pub struct App {
     pub confirm_pending: Option<ConfirmPending>,
     /// Human-readable message shown in the confirmation dialog.
     pub confirm_message: Option<String>,
+    /// Queue of auto-connect prompts to show after install.
+    pub auto_connect_queue: Vec<ConfirmPending>,
     /// Clickable area for the Yes/Confirm button in the confirmation dialog.
     pub confirm_yes_area: Option<Rect>,
     /// Clickable area for the No/Cancel button in the confirmation dialog.
@@ -206,6 +226,7 @@ impl App {
             client: SnapdClient::new(),
             installed: vec![],
             store_results: vec![],
+            local_file_results: vec![],
             search_query: String::new(),
             search_focused: false,
             list_state,
@@ -222,6 +243,8 @@ impl App {
             connections_activated: false,
             active_change_id: None,
             active_change: None,
+            active_change_action: None,
+            active_change_snap: None,
             show_changes_sidebar: false,
             show_help: false,
             sidebar_changes: vec![],
@@ -235,6 +258,7 @@ impl App {
             channel_input: String::new(),
             pending_channel_action: None,
             classic_pending: None,
+            classic_local_path: None,
             managed_snap_name: None,
             snap_interfaces: vec![],
             snap_connections: vec![],
@@ -267,23 +291,13 @@ impl App {
                     })
                     .unwrap_or(image::Rgba([30u8, 30u8, 30u8, 255u8]));
                 picker.set_background_color(Some(bg));
-
-                // VTE-based terminals (Tilix, GNOME Terminal, etc.) support Sixel
-                // but the capability query may not be detected in time. Force Sixel
-                // when we know we're in a VTE terminal and the picker fell back to
-                // halfblocks.
-                let is_vte =
-                    std::env::var("VTE_VERSION").is_ok() || std::env::var("TILIX_ID").is_ok();
-                if is_vte && picker.protocol_type() == ProtocolType::Halfblocks {
-                    picker.set_protocol_type(ProtocolType::Sixel);
-                }
-
                 picker
             }),
             icon_cache: HashMap::default(),
             icon_fetching: HashSet::default(),
             confirm_pending: None,
             confirm_message: None,
+            auto_connect_queue: Vec::new(),
             confirm_yes_area: None,
             confirm_no_area: None,
             confirm_hovered: None,
@@ -308,9 +322,114 @@ impl App {
         self.search_focused = !self.search_focused;
     }
 
-    pub fn toggle_installed_filter(&mut self) {
-        self.show_installed_only = !self.show_installed_only;
-        self.list_state.select(Some(0));
+    /// True when the current process is running as root (uid 0).
+    pub fn is_root() -> bool {
+        unsafe { libc::getuid() == 0 }
+    }
+
+    /// If `e` is an elevation error and we are not already root, serialize the
+    /// current app state along with the intended `action` and re-exec under
+    /// pkexec/sudo. If we are already root, this is a no-op (error falls
+    /// through to the normal error display path).
+    pub fn try_elevate_and_exec(
+        &self,
+        snap_name: &str,
+        action: Option<crate::resume::ResumeAction>,
+    ) {
+        if Self::is_root() {
+            return;
+        }
+        let resume = crate::resume::ResumeState {
+            selected_snap: Some(snap_name.to_string()),
+            search_query: self.search_query.clone(),
+            show_installed_only: self.show_installed_only,
+            pending: action,
+        };
+        crate::resume::reexec_elevated(&resume);
+    }
+
+    /// Restore search state, snap selection, and execute the pending action
+    /// from a `--resume` argument. Called once after initial load when the
+    /// process was re-exec'd with elevated privileges.
+    pub async fn apply_resume(&mut self, state: crate::resume::ResumeState) {
+        self.search_query = state.search_query;
+        self.show_installed_only = state.show_installed_only;
+
+        // Restore list position by snap name and pin managed_snap_name so
+        // reload() after the change completes can restore the selection.
+        if let Some(ref name) = state.selected_snap {
+            let snaps = self.display_snaps();
+            if let Some(idx) = snaps.iter().position(|s| &s.name == name) {
+                self.list_state.select(Some(idx));
+            }
+            self.managed_snap_name = Some(name.clone());
+        }
+
+        // Re-run the action that triggered elevation (already confirmed by the user).
+        if let Some(action) = state.pending {
+            self.execute_resume_action(action).await;
+        }
+    }
+
+    /// Execute a resume action directly, bypassing confirm dialogs.
+    pub async fn execute_resume_action(&mut self, action: crate::resume::ResumeAction) {
+        use crate::resume::ResumeAction;
+        match action {
+            ResumeAction::Install { snap_name, channel } => {
+                self.execute_action(snap_name, ManageAction::Install, channel.as_deref())
+                    .await;
+            }
+            ResumeAction::InstallClassic { snap_name, channel } => {
+                self.loading = true;
+                self.error = None;
+                self.status_message = None;
+                match self
+                    .client
+                    .install_snap_classic(&snap_name, channel.as_deref())
+                    .await
+                {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some("Installing (classic)…".to_string());
+                        self.active_change_action = Some(ManageAction::InstallFromChannel);
+                        self.active_change_snap = Some(snap_name);
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
+                self.loading = false;
+            }
+            ResumeAction::Refresh { snap_name, channel } => {
+                self.execute_action(snap_name, ManageAction::Refresh, channel.as_deref())
+                    .await;
+            }
+            ResumeAction::SwitchChannel { snap_name, channel } => {
+                self.execute_action(snap_name, ManageAction::SwitchChannel, Some(&channel))
+                    .await;
+            }
+            ResumeAction::Revert { snap_name } => {
+                self.execute_action(snap_name, ManageAction::Revert, None)
+                    .await;
+            }
+            ResumeAction::Enable { snap_name } => {
+                self.execute_action(snap_name, ManageAction::Enable, None)
+                    .await;
+            }
+            ResumeAction::Disable { snap_name } => {
+                self.execute_action(snap_name, ManageAction::Disable, None)
+                    .await;
+            }
+            ResumeAction::Uninstall { snap_name } => {
+                self.execute_action(snap_name, ManageAction::Uninstall, None)
+                    .await;
+            }
+            ResumeAction::UninstallPurge { snap_name } => {
+                self.execute_action(snap_name, ManageAction::UninstallPurge, None)
+                    .await;
+            }
+        }
     }
 
     pub fn toggle_changes_sidebar(&mut self) {
@@ -320,23 +439,14 @@ impl App {
         }
     }
 
-    pub fn cycle_sort(&mut self) {
-        self.sort_mode = match self.sort_mode {
-            SortMode::Relevance => SortMode::NameAsc,
-            SortMode::NameAsc => SortMode::NameDesc,
-            SortMode::NameDesc => SortMode::RevisionDesc,
-            SortMode::RevisionDesc => SortMode::Relevance,
-        };
-        self.list_state.select(Some(0));
-    }
-
     pub fn display_snaps(&self) -> Vec<DisplaySnap> {
         let query = self.search_query.trim().to_lowercase();
 
         let mut snaps: Vec<DisplaySnap> = if self.showing_results {
             let installed_names: std::collections::HashSet<&str> =
                 self.installed.iter().map(|s| s.name.as_str()).collect();
-            self.store_results
+            let mut results: Vec<DisplaySnap> = self
+                .store_results
                 .iter()
                 .filter(|s| !self.show_installed_only || installed_names.contains(s.name.as_str()))
                 .map(|s| {
@@ -346,7 +456,9 @@ impl App {
                     }
                     d
                 })
-                .collect()
+                .collect();
+            results.extend(self.local_file_results.clone());
+            results
         } else {
             self.installed.iter().map(DisplaySnap::from).collect()
         };
@@ -357,50 +469,56 @@ impl App {
         match effective_sort {
             SortMode::Relevance => {
                 snaps.sort_by(|a, b| {
-                    let qa =
-                        match_quality(&a.name, a.title.as_deref(), a.summary.as_deref(), &query);
-                    let qb =
-                        match_quality(&b.name, b.title.as_deref(), b.summary.as_deref(), &query);
-                    // Lower quality score = better match. Installed always beats uninstalled.
-                    let installed_ord = b.installed.cmp(&a.installed);
-                    installed_ord
-                        .then_with(|| qa.cmp(&qb))
+                    sort_group(a)
+                        .cmp(&sort_group(b))
+                        .then_with(|| {
+                            let qa = match_quality(
+                                &a.name,
+                                a.title.as_deref(),
+                                a.summary.as_deref(),
+                                &query,
+                            );
+                            let qb = match_quality(
+                                &b.name,
+                                b.title.as_deref(),
+                                b.summary.as_deref(),
+                                &query,
+                            );
+                            qa.cmp(&qb)
+                        })
                         .then_with(|| a.name.cmp(&b.name))
                 });
             }
             SortMode::NameAsc => {
                 snaps.sort_by(|a, b| {
-                    a.name
-                        .to_lowercase()
-                        .cmp(&b.name.to_lowercase())
-                        .then_with(|| a.name.cmp(&b.name))
+                    sort_group(a).cmp(&sort_group(b)).then_with(|| {
+                        a.name
+                            .to_lowercase()
+                            .cmp(&b.name.to_lowercase())
+                            .then_with(|| a.name.cmp(&b.name))
+                    })
                 });
-                if self.showing_results {
-                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
-                }
             }
             SortMode::NameDesc => {
                 snaps.sort_by(|a, b| {
-                    b.name
-                        .to_lowercase()
-                        .cmp(&a.name.to_lowercase())
-                        .then_with(|| b.name.cmp(&a.name))
+                    sort_group(a).cmp(&sort_group(b)).then_with(|| {
+                        b.name
+                            .to_lowercase()
+                            .cmp(&a.name.to_lowercase())
+                            .then_with(|| b.name.cmp(&a.name))
+                    })
                 });
-                if self.showing_results {
-                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
-                }
             }
             SortMode::RevisionDesc => {
                 snaps.sort_by(|a, b| {
-                    b.install_date
-                        .as_deref()
-                        .unwrap_or_default()
-                        .cmp(a.install_date.as_deref().unwrap_or_default())
-                        .then_with(|| a.name.cmp(&b.name))
+                    sort_group(a).cmp(&sort_group(b)).then_with(|| {
+                        b.install_date
+                            .as_deref()
+                            .unwrap_or_default()
+                            .cmp(a.install_date.as_deref().unwrap_or_default())
+                            .then_with(|| a.name.cmp(&b.name))
+                    })
                 });
-                if self.showing_results {
-                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
-                }
             }
         }
 
@@ -413,755 +531,13 @@ impl App {
         snaps.get(idx).cloned()
     }
 
-    pub fn next(&mut self) {
-        let len = self.display_snaps().len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.list_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    pub fn prev(&mut self) {
-        let len = self.display_snaps().len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.list_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    pub fn page_down(&mut self) {
-        let len = self.display_snaps().len();
-        if len == 0 {
-            return;
-        }
-        let i = self
-            .list_state
-            .selected()
-            .unwrap_or(0)
-            .saturating_add(10)
-            .min(len - 1);
-        self.list_state.select(Some(i));
-    }
-
-    pub fn page_up(&mut self) {
-        let len = self.display_snaps().len();
-        if len == 0 {
-            return;
-        }
-        let i = self.list_state.selected().unwrap_or(0).saturating_sub(10);
-        self.list_state.select(Some(i));
-    }
-
-    pub fn manage_next(&mut self) {
-        let len = self.manage_actions.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.manage_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.manage_state.select(Some(i));
-    }
-
-    pub fn manage_prev(&mut self) {
-        let len = self.manage_actions.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.manage_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.manage_state.select(Some(i));
-    }
-
-    pub fn connections_next(&mut self) {
-        let len = self.connection_items().len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.connections_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.connections_state.select(Some(i));
-    }
-
-    pub fn connections_prev(&mut self) {
-        let len = self.connection_items().len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.connections_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.connections_state.select(Some(i));
-    }
-
-    pub fn connections_page_down(&mut self) {
-        let len = self.connection_items().len();
-        if len == 0 {
-            return;
-        }
-        let i = self
-            .connections_state
-            .selected()
-            .unwrap_or(0)
-            .saturating_add(10)
-            .min(len - 1);
-        self.connections_state.select(Some(i));
-    }
-
-    pub fn connections_page_up(&mut self) {
-        let len = self.connection_items().len();
-        if len == 0 {
-            return;
-        }
-        let i = self
-            .connections_state
-            .selected()
-            .unwrap_or(0)
-            .saturating_sub(10);
-        self.connections_state.select(Some(i));
-    }
-
-    pub fn toggle_connections_mode(&mut self) {
-        self.connections_mode = !self.connections_mode;
-        if self.connections_mode {
-            // Entering connections pane: show ghost arrow on manage, highlight connections
-            self.manage_state
-                .select(Some(self.manage_state.selected().unwrap_or(0)));
-            if self.connections_state.selected().is_none() && !self.connection_items().is_empty() {
-                self.connections_state.select(Some(0));
-            }
-            self.connections_activated = true;
-        } else {
-            // Returning to manage actions: show ghost arrow on connections, highlight manage
-            self.connections_state
-                .select(Some(self.connections_state.selected().unwrap_or(0)));
-            if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
-                self.manage_state.select(Some(0));
-            }
-            self.manage_activated = true;
-        }
-    }
-
-    pub fn close_connections_mode(&mut self) {
-        self.connections_mode = false;
-        // Keep connections position as ghost, restore manage highlight
-        if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
-            self.manage_state.select(Some(0));
-        }
-        self.manage_activated = true;
-    }
-
-    pub fn selected_connection(&self) -> Option<ConnectionItem> {
-        let idx = self.connections_state.selected()?;
-        self.connection_items().get(idx).cloned()
-    }
-
-    pub fn channel_picker_next(&mut self) {
-        let len = self.available_channels.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.channel_picker_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.channel_picker_state.select(Some(i));
-    }
-
-    pub fn channel_picker_prev(&mut self) {
-        let len = self.available_channels.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.channel_picker_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.channel_picker_state.select(Some(i));
-    }
-
-    pub fn changes_next(&mut self) {
-        let len = self.changes_list.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.changes_list_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.changes_list_state.select(Some(i));
-        self.changes_detail_state.select(Some(0));
-    }
-
-    pub fn changes_prev(&mut self) {
-        let len = self.changes_list.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.changes_list_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.changes_list_state.select(Some(i));
-        self.changes_detail_state.select(Some(0));
-    }
-
-    pub fn changes_detail_next(&mut self) {
-        let len = self
-            .selected_change()
-            .map(|change| change.tasks.len())
-            .unwrap_or(0);
-        if len == 0 {
-            return;
-        }
-        let i = match self.changes_detail_state.selected() {
-            Some(i) => (i + 1).min(len - 1),
-            None => 0,
-        };
-        self.changes_detail_state.select(Some(i));
-    }
-
-    pub fn changes_detail_prev(&mut self) {
-        let len = self
-            .selected_change()
-            .map(|change| change.tasks.len())
-            .unwrap_or(0);
-        if len == 0 {
-            return;
-        }
-        let i = match self.changes_detail_state.selected() {
-            Some(0) | None => 0,
-            Some(i) => i - 1,
-        };
-        self.changes_detail_state.select(Some(i));
-    }
-
-    pub fn open_manage(&mut self) {
-        let Some(snap) = self.selected_snap() else {
-            return;
-        };
-        let mut actions = vec![];
-        if snap.installed {
-            actions.push(ManageAction::Refresh);
-            actions.push(ManageAction::SwitchChannel);
-            actions.push(ManageAction::Revert);
-            actions.push(ManageAction::Enable);
-            actions.push(ManageAction::Disable);
-            actions.push(ManageAction::Uninstall);
-        } else {
-            actions.push(ManageAction::Install);
-            actions.push(ManageAction::InstallFromChannel);
-        }
-        actions.push(ManageAction::OpenStorePage);
-        if snap.contact.is_some() {
-            actions.push(ManageAction::OpenContactPage);
-        }
-        self.managed_snap_name = Some(snap.name);
-        self.manage_actions = actions;
-        let mut ms = ListState::default();
-        ms.select(Some(0));
-        self.manage_state = ms;
-        self.manage_activated = true;
-        self.snap_interfaces.clear();
-        self.snap_connections.clear();
-        self.interfaces_loading = false;
-        self.connections_mode = false;
-        self.connections_state = ListState::default();
-        self.connections_activated = false;
-        self.mode = AppMode::Manage;
-        self.error = None;
-        self.status_message = None;
-    }
-
-    pub async fn load_snap_interfaces(&mut self, snap_name: &str) {
-        self.interfaces_loading = true;
-        self.snap_interfaces.clear();
-        self.snap_connections.clear();
-        self.connections_state = ListState::default();
-        // Fetch interfaces (for plug/slot topology) and active connections
-        // (for connected state) in parallel — select=all does NOT populate
-        // Plug.connections, so we must cross-reference with /v2/connections.
-        let (iface_result, conn_result) = {
-            let c = &self.client;
-            tokio::join!(c.list_snap_interfaces(snap_name), c.list_connections())
-        };
-        match iface_result {
-            Ok(interfaces) => {
-                self.snap_interfaces = interfaces;
-            }
-            Err(_) => {
-                self.snap_interfaces.clear();
-            }
-        }
-        if let Ok(connections) = conn_result {
-            self.snap_connections = connections;
-        }
-        // Pre-select index 0 so the ghost arrow shows immediately (connections_activated
-        // prevents this from counting as a "second click").
-        if !self.connection_items().is_empty() {
-            self.connections_state.select(Some(0));
-            self.connections_activated = true;
-        } else {
-            self.connections_state.select(None);
-        }
-        self.interfaces_loading = false;
-    }
-
-    pub fn close_manage(&mut self) {
-        self.mode = AppMode::Browse;
-        self.manage_actions.clear();
-        // Keep tracking any active change so the app can refresh after leaving the pane.
-        self.available_channels.clear();
-        self.channel_picker_state = ListState::default();
-        self.channel_input.clear();
-        self.pending_channel_action = None;
-        self.classic_pending = None;
-        self.confirm_pending = None;
-        self.confirm_message = None;
-        self.managed_snap_name = None;
-        self.snap_interfaces.clear();
-        self.snap_connections.clear();
-        self.interfaces_loading = false;
-        self.connections_mode = false;
-        self.connections_state = ListState::default();
-        self.slot_picker_plug = None;
-        self.slot_picker_items.clear();
-        self.slot_picker_state = ListState::default();
-    }
-
     /// Returns true if `action` is destructive and should require confirmation.
-    pub fn action_needs_confirm(action: &ManageAction) -> bool {
-        matches!(
-            action,
-            ManageAction::Uninstall | ManageAction::Revert | ManageAction::Disable
-        )
-    }
-
-    /// Show a confirmation dialog before executing the given action.
-    pub fn request_confirm_action(&mut self, action: ManageAction) {
-        let snap_name = self
-            .selected_snap()
-            .map(|s| s.title.unwrap_or(s.name))
-            .unwrap_or_default();
-        self.confirm_message = Some(match &action {
-            ManageAction::Uninstall => format!("Uninstall {snap_name}?"),
-            ManageAction::Revert => format!("Revert {snap_name} to the previous version?"),
-            ManageAction::Disable => format!("Disable {snap_name}?"),
-            _ => format!("Run \"{}\" on {snap_name}?", action.label()),
-        });
-        self.confirm_pending = Some(ConfirmPending::Action(action));
-        self.confirm_hovered = Some(false); // default to No
-        self.mode = AppMode::Confirm;
-    }
-
-    /// Show a confirmation dialog before toggling a connection.
-    pub fn request_confirm_connection(&mut self) {
-        let Some(item) = self.selected_connection() else {
-            return;
-        };
-        let (pending, msg) = if item.connected {
-            (
-                ConfirmPending::Disconnect,
-                format!(
-                    "Disconnect {}:{} from {}:{}?",
-                    item.plug_snap, item.plug_name, item.slot_snap, item.slot_name
-                ),
-            )
-        } else {
-            (
-                ConfirmPending::Connect,
-                format!(
-                    "Connect {}:{} to {}:{}?",
-                    item.plug_snap, item.plug_name, item.slot_snap, item.slot_name
-                ),
-            )
-        };
-        self.confirm_message = Some(msg);
-        self.confirm_pending = Some(pending);
-        self.confirm_hovered = Some(false); // default to No
-        self.mode = AppMode::Confirm;
-    }
-
-    pub fn cancel_confirm(&mut self) {
-        self.confirm_pending = None;
-        self.confirm_message = None;
-        self.confirm_hovered = None;
-        self.mode = AppMode::Manage;
-    }
-
-    pub async fn execute_confirm(&mut self) {
-        let Some(pending) = self.confirm_pending.take() else {
-            return;
-        };
-        self.confirm_message = None;
-        self.mode = AppMode::Manage;
-        match pending {
-            ConfirmPending::Action(action) => {
-                let name = match self.selected_snap().map(|s| s.name.clone()) {
-                    Some(n) => n,
-                    None => return,
-                };
-                self.execute_action(name, action, None).await;
-            }
-            ConfirmPending::Connect => self.connect_selected().await,
-            ConfirmPending::Disconnect => self.disconnect_selected().await,
-        }
-    }
-
-    /// Dismiss the classic confirmation and go back to the manage panel.
-    pub fn cancel_classic(&mut self) {
-        self.classic_pending = None;
-        self.mode = AppMode::Manage;
-        self.error = None;
-    }
-
-    /// Confirm and re-run the install with `classic: true`.
-    pub async fn confirm_classic(&mut self) {
-        let Some((name, channel)) = self.classic_pending.take() else {
-            return;
-        };
-        self.mode = AppMode::Manage;
-        self.loading = true;
-        self.error = None;
-        self.status_message = None;
-        match self
-            .client
-            .install_snap_classic(&name, channel.as_deref())
-            .await
-        {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some("Installing (classic)…".to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-        self.loading = false;
-    }
-
-    pub fn close_channel_picker(&mut self) {
-        self.mode = AppMode::Manage;
-        self.available_channels.clear();
-        self.channel_picker_state = ListState::default();
-        self.channel_input.clear();
-        self.pending_channel_action = None;
-    }
-
-    pub async fn open_channel_picker(&mut self, action: ManageAction) {
-        let Some(name) = self.selected_snap().map(|snap| snap.name) else {
-            return;
-        };
-
-        self.loading = true;
-        self.error = None;
-        self.channel_input.clear();
-        self.pending_channel_action = Some(action);
-
-        match self.client.find_snap_by_name(&name).await {
-            Ok(store_snap) => {
-                let mut channels: Vec<(String, ChannelSnapInfo)> = store_snap
-                    .map(|snap| snap.channels.into_iter().collect())
-                    .unwrap_or_default();
-                channels.sort_by_key(|a| channel_sort_key(&a.0));
-                channels.push((String::new(), empty_channel_info()));
-                self.available_channels = channels;
-                self.channel_picker_state = ListState::default();
-                self.mode = AppMode::ChannelPicker;
-            }
-            Err(e) => {
-                self.pending_channel_action = None;
-                self.error = Some(e.to_string());
-            }
-        }
-
-        self.loading = false;
-    }
-
-    pub fn open_custom_channel_input(&mut self) {
-        self.channel_input.clear();
-        self.mode = AppMode::ChannelInput;
-    }
-
-    pub fn close_channel_input(&mut self) {
-        self.channel_input.clear();
-        if self.available_channels.is_empty() {
-            self.mode = AppMode::Manage;
-            self.pending_channel_action = None;
-        } else {
-            self.mode = AppMode::ChannelPicker;
-        }
-    }
-
-    pub fn selected_manage_action(&self) -> Option<&ManageAction> {
-        let idx = self.manage_state.selected()?;
-        self.manage_actions.get(idx)
-    }
-
-    pub fn selected_change(&self) -> Option<&Change> {
-        let idx = self.changes_list_state.selected()?;
-        self.changes_list.get(idx)
-    }
-
-    pub async fn execute_selected_action(&mut self) {
-        let action = match self.selected_manage_action().cloned() {
-            Some(a) => a,
-            None => return,
-        };
-        if action.needs_channel_input() {
-            self.open_channel_picker(action).await;
-            return;
-        }
-        if Self::action_needs_confirm(&action) {
-            self.request_confirm_action(action);
-            return;
-        }
-        let name = match self.selected_snap().map(|s| s.name.clone()) {
-            Some(n) => n,
-            None => return,
-        };
-        self.execute_action(name, action, None).await;
-    }
-
-    pub async fn activate_selected_connection(&mut self) {
-        if self.selected_connection().is_none() {
-            return;
-        };
-        self.request_confirm_connection();
-    }
-
-    pub async fn connect_selected(&mut self) {
-        if self.active_change_id.is_some() {
-            self.status_message = Some("Operation already in progress".to_string());
-            return;
-        }
-
-        let Some(item) = self.selected_connection() else {
-            return;
-        };
-        if item.connected {
-            self.status_message = Some("Connection already active".to_string());
-            return;
-        }
-        if !item.is_plug {
-            self.error = Some("Select a plug to create a new connection".to_string());
-            return;
-        }
-
-        // Collect all available slots for this interface (from any snap).
-        let available_slots: Vec<SlotRef> = self
-            .snap_interfaces
-            .iter()
-            .find(|iface| iface.name == item.interface_name)
-            .map(|iface| {
-                iface
-                    .slots
-                    .iter()
-                    .map(|slot| SlotRef {
-                        snap: slot.snap.clone().unwrap_or_default(),
-                        slot: slot.slot.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        if available_slots.is_empty() {
-            self.error = Some(format!(
-                "No available slots for interface '{}'",
-                item.interface_name
-            ));
-            return;
-        }
-
-        // If there is exactly one slot, connect immediately; otherwise show the picker.
-        if available_slots.len() == 1 {
-            let target = available_slots.into_iter().next().unwrap();
-            self.do_connect_to_slot(&item, target).await;
-        } else {
-            let mut state = ListState::default();
-            state.select(Some(0));
-            self.slot_picker_plug = Some(item);
-            self.slot_picker_items = available_slots;
-            self.slot_picker_state = state;
-            self.mode = AppMode::SlotPicker;
-        }
-    }
-
-    pub fn slot_picker_next(&mut self) {
-        let len = self.slot_picker_items.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.slot_picker_state.selected() {
-            Some(i) => (i + 1) % len,
-            None => 0,
-        };
-        self.slot_picker_state.select(Some(i));
-    }
-
-    pub fn slot_picker_prev(&mut self) {
-        let len = self.slot_picker_items.len();
-        if len == 0 {
-            return;
-        }
-        let i = match self.slot_picker_state.selected() {
-            Some(0) | None => len - 1,
-            Some(i) => i - 1,
-        };
-        self.slot_picker_state.select(Some(i));
-    }
-
-    pub fn close_slot_picker(&mut self) {
-        self.mode = AppMode::Manage;
-        self.slot_picker_plug = None;
-        self.slot_picker_items.clear();
-        self.slot_picker_state = ListState::default();
-    }
-
-    pub async fn confirm_slot_pick(&mut self) {
-        let Some(idx) = self.slot_picker_state.selected() else {
-            return;
-        };
-        let Some(target) = self.slot_picker_items.get(idx).cloned() else {
-            return;
-        };
-        let Some(plug) = self.slot_picker_plug.take() else {
-            return;
-        };
-        self.slot_picker_items.clear();
-        self.slot_picker_state = ListState::default();
-        self.mode = AppMode::Manage;
-        self.do_connect_to_slot(&plug, target).await;
-    }
-
-    async fn do_connect_to_slot(&mut self, plug: &ConnectionItem, target: SlotRef) {
-        self.loading = true;
-        self.error = None;
-        self.status_message = None;
-        match self
-            .client
-            .connect_interface(&plug.plug_snap, &plug.plug_name, &target.snap, &target.slot)
-            .await
-        {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some("Connecting…".to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-        self.loading = false;
-    }
-
-    pub async fn disconnect_selected(&mut self) {
-        if self.active_change_id.is_some() {
-            self.status_message = Some("Operation already in progress".to_string());
-            return;
-        }
-
-        let Some(item) = self.selected_connection() else {
-            return;
-        };
-        if !item.connected {
-            self.status_message = Some("Connection already disconnected".to_string());
-            return;
-        }
-
-        self.loading = true;
-        self.error = None;
-        self.status_message = None;
-        match self
-            .client
-            .disconnect_interface(
-                &item.plug_snap,
-                &item.plug_name,
-                &item.slot_snap,
-                &item.slot_name,
-            )
-            .await
-        {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some("Disconnecting…".to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-        self.loading = false;
-    }
-
-    pub async fn confirm_channel_pick(&mut self) {
-        let Some(idx) = self.channel_picker_state.selected() else {
-            return;
-        };
-        let Some((channel, _)) = self.available_channels.get(idx).cloned() else {
-            return;
-        };
-
-        if channel.is_empty() {
-            self.open_custom_channel_input();
-            return;
-        }
-
-        let name = match self.selected_snap().map(|s| s.name.clone()) {
-            Some(n) => n,
-            None => return,
-        };
-        let action = match self.pending_channel_action.take() {
-            Some(a) => a,
-            None => return,
-        };
-
-        self.mode = AppMode::Manage;
-        self.available_channels.clear();
-        self.channel_picker_state = ListState::default();
-        self.execute_action(name, action, Some(channel.as_str()))
-            .await;
-    }
-
-    pub async fn execute_channel_action(&mut self) {
-        let name = match self.selected_snap().map(|s| s.name.clone()) {
-            Some(n) => n,
-            None => return,
-        };
-        let action = match self.pending_channel_action.take() {
-            Some(a) => a,
-            None => return,
-        };
-        let channel = self.channel_input.trim().to_string();
-        let channel_opt = if channel.is_empty() {
-            None
-        } else {
-            Some(channel.clone())
-        };
-        self.mode = AppMode::Manage;
-        self.available_channels.clear();
-        self.channel_picker_state = ListState::default();
-        self.channel_input.clear();
-        self.execute_action(name, action, channel_opt.as_deref())
-            .await;
-    }
-
-    async fn execute_action(&mut self, name: String, action: ManageAction, channel: Option<&str>) {
+    pub(crate) async fn execute_action(
+        &mut self,
+        name: String,
+        action: ManageAction,
+        channel: Option<&str>,
+    ) {
         if self.active_change_id.is_some() {
             self.status_message = Some("Operation already in progress".to_string());
             return;
@@ -1170,6 +546,8 @@ impl App {
         self.loading = true;
         self.error = None;
         self.status_message = None;
+        self.active_change_action = Some(action.clone());
+        self.active_change_snap = Some(name.clone());
 
         let result: Result<&str, snapd_rs::Error> = match &action {
             ManageAction::Install => match self.client.install_snap(&name, None).await {
@@ -1181,6 +559,7 @@ impl App {
                 Err(e) if e.is_kind("snap-needs-classic") => {
                     self.loading = false;
                     self.classic_pending = Some((name, None));
+                    self.confirm_hovered = Some(false);
                     self.mode = AppMode::ClassicConfirm;
                     return;
                 }
@@ -1196,6 +575,7 @@ impl App {
                     Err(e) if e.is_kind("snap-needs-classic") => {
                         self.loading = false;
                         self.classic_pending = Some((name, channel.map(str::to_owned)));
+                        self.confirm_hovered = Some(false);
                         self.mode = AppMode::ClassicConfirm;
                         return;
                     }
@@ -1250,6 +630,29 @@ impl App {
                 }
                 Err(e) => Err(e),
             },
+            ManageAction::UninstallPurge => match self.client.remove_snap_purge(&name).await {
+                Ok(change_id) => {
+                    self.active_change_id = Some(change_id.0);
+                    self.active_change = None;
+                    Ok("Uninstalling (purge)…")
+                }
+                Err(e) => Err(e),
+            },
+            ManageAction::InstallLocalFile => match self.client.sideload_snap(&name).await {
+                Ok(change_id) => {
+                    self.active_change_id = Some(change_id.0);
+                    self.active_change = None;
+                    Ok("Sideloading…")
+                }
+                Err(e) if e.is_kind("snap-needs-classic") => {
+                    self.loading = false;
+                    self.classic_local_path = Some(name);
+                    self.confirm_hovered = Some(false);
+                    self.mode = AppMode::ClassicConfirm;
+                    return;
+                }
+                Err(e) => Err(e),
+            },
             ManageAction::OpenStorePage => {
                 open_url(&format!("https://snapcraft.io/{name}"));
                 Ok("Opened store page")
@@ -1273,6 +676,48 @@ impl App {
             Ok(msg) => {
                 self.status_message = Some(msg.to_string());
             }
+            Err(ref e) if crate::resume::is_elevation_needed(e) => {
+                use crate::resume::ResumeAction;
+                let resume_action = match &action {
+                    ManageAction::Install => Some(ResumeAction::Install {
+                        snap_name: name.clone(),
+                        channel: channel.map(str::to_owned),
+                    }),
+                    ManageAction::InstallFromChannel => Some(ResumeAction::Install {
+                        snap_name: name.clone(),
+                        channel: channel.map(str::to_owned),
+                    }),
+                    ManageAction::InstallLocalFile => None,
+                    ManageAction::Refresh => Some(ResumeAction::Refresh {
+                        snap_name: name.clone(),
+                        channel: channel.map(str::to_owned),
+                    }),
+                    ManageAction::SwitchChannel => channel.map(|ch| ResumeAction::SwitchChannel {
+                        snap_name: name.clone(),
+                        channel: ch.to_owned(),
+                    }),
+                    ManageAction::Revert => Some(ResumeAction::Revert {
+                        snap_name: name.clone(),
+                    }),
+                    ManageAction::Enable => Some(ResumeAction::Enable {
+                        snap_name: name.clone(),
+                    }),
+                    ManageAction::Disable => Some(ResumeAction::Disable {
+                        snap_name: name.clone(),
+                    }),
+                    ManageAction::Uninstall => Some(ResumeAction::Uninstall {
+                        snap_name: name.clone(),
+                    }),
+                    ManageAction::UninstallPurge => Some(ResumeAction::UninstallPurge {
+                        snap_name: name.clone(),
+                    }),
+                    // Non-privileged actions — shouldn't fail with elevation error.
+                    ManageAction::OpenStorePage | ManageAction::OpenContactPage => None,
+                };
+                self.try_elevate_and_exec(&name, resume_action);
+                // Only reached if already root — show the error normally.
+                self.error = Some(result.unwrap_err().to_string());
+            }
             Err(e) => {
                 self.error = Some(e.to_string());
             }
@@ -1289,6 +734,8 @@ impl App {
                     if ready {
                         self.active_change_id = None;
                         self.active_change = None;
+                        let action = self.active_change_action.take();
+                        let snap_name = self.active_change_snap.take();
                         let in_connections =
                             self.connections_mode || self.mode == AppMode::SlotPicker;
                         if in_connections {
@@ -1311,6 +758,15 @@ impl App {
                         } else {
                             self.status_message = Some("Done".to_string());
                             self.reload().await;
+                            // After a successful install, prompt to connect unconnected system interfaces.
+                            if matches!(
+                                action,
+                                Some(ManageAction::Install)
+                                    | Some(ManageAction::InstallFromChannel)
+                            ) && let Some(name) = snap_name
+                            {
+                                self.queue_auto_connect_prompts(&name).await;
+                            }
                         }
                     }
                 }
@@ -1341,79 +797,7 @@ impl App {
         }
     }
 
-    pub async fn poll_sidebar_changes(&mut self) {
-        if let Ok(changes) = self.client.list_changes().await {
-            self.sidebar_changes = changes;
-        }
-    }
-
-    pub async fn load_changes(&mut self) {
-        self.loading = true;
-        self.error = None;
-        match self.client.list_all_changes().await {
-            Ok(mut changes) => {
-                sort_changes(&mut changes);
-                self.changes_list = changes;
-                self.changes_focus_detail = false;
-                self.changes_list_state
-                    .select((!self.changes_list.is_empty()).then_some(0));
-                self.changes_detail_state.select(
-                    self.selected_change()
-                        .and_then(|change| (!change.tasks.is_empty()).then_some(0)),
-                );
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-        self.changes_last_polled = Some(Instant::now());
-        self.loading = false;
-    }
-
     /// Refresh the changes list while preserving the current selection.
-    pub async fn poll_changes(&mut self) {
-        if let Ok(mut changes) = self.client.list_all_changes().await {
-            let selected_id = self
-                .changes_list_state
-                .selected()
-                .and_then(|i| self.changes_list.get(i))
-                .map(|c| c.id.clone());
-            sort_changes(&mut changes);
-            self.changes_list = changes;
-            // Restore selection by id, fall back to same index, else first item.
-            let new_idx = selected_id
-                .and_then(|id| self.changes_list.iter().position(|c| c.id == id))
-                .or(self.changes_list_state.selected())
-                .map(|i| i.min(self.changes_list.len().saturating_sub(1)))
-                .filter(|_| !self.changes_list.is_empty());
-            self.changes_list_state.select(new_idx);
-        }
-        self.changes_last_polled = Some(Instant::now());
-    }
-
-    pub async fn abort_selected_change(&mut self) {
-        let Some(change) = self.selected_change().cloned() else {
-            return;
-        };
-        if change.ready {
-            self.status_message = Some("Change already finished".to_string());
-            return;
-        }
-
-        self.loading = true;
-        self.error = None;
-        match self.client.abort_change(&change.id).await {
-            Ok(_) => {
-                self.status_message = Some("Abort requested".to_string());
-                self.load_changes().await;
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-        self.loading = false;
-    }
-
     pub async fn reload(&mut self) {
         // Prefer the explicitly-recorded managed snap name (survives close_manage) over
         // inferring from list_state, which can be ambiguous or stale.
@@ -1494,20 +878,72 @@ impl App {
         self.loading = true;
         self.error = None;
         let query = self.search_query.clone();
-        let (fuzzy_result, exact_result) = {
-            let client = &self.client;
-            tokio::join!(client.find_snaps(&query), client.find_snap_by_name(&query))
-        };
 
-        let mut results = fuzzy_result.as_ref().ok().cloned().unwrap_or_default();
-        if let Ok(Some(exact)) = &exact_result
+        // Perform store search in parallel with local file search
+        let (store_fuzzy, store_exact, local_files) = tokio::join!(
+            {
+                let client = &self.client;
+                client.find_snaps(&query)
+            },
+            {
+                let client = &self.client;
+                client.find_snap_by_name(&query)
+            },
+            {
+                let q = query.clone();
+                async move {
+                    use std::fs;
+                    let mut files = Vec::new();
+                    if let Ok(entries) = fs::read_dir(".") {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if let Some(name) = path
+                                .file_name()
+                                .and_then(|n| n.to_str().map(|s| s.to_owned()))
+                                && name.to_lowercase().contains(&q.to_lowercase())
+                                && (name.ends_with(".snap") || name.ends_with(".comp"))
+                            {
+                                let full_path = path
+                                    .canonicalize()
+                                    .ok()
+                                    .and_then(|p| p.to_str().map(|s| s.to_owned()));
+                                files.push(DisplaySnap {
+                                    name,
+                                    title: None,
+                                    version: None,
+                                    summary: None,
+                                    description: None,
+                                    publisher: None,
+                                    confinement: None,
+                                    channel: None,
+                                    contact: None,
+                                    icon_url: None,
+                                    size: None,
+                                    installed: false,
+                                    install_date: None,
+                                    is_local_file: true,
+                                    local_file_path: full_path,
+                                });
+                            }
+                        }
+                    }
+                    files
+                }
+            }
+        );
+
+        let mut results = store_fuzzy.as_ref().ok().cloned().unwrap_or_default();
+        if let Ok(Some(exact)) = &store_exact
             && !results.iter().any(|result| result.name == exact.name)
         {
             results.insert(0, exact.clone());
         }
 
+        // Merge local files into results
+        self.local_file_results = local_files;
+
         if results.is_empty()
-            && let Some(error) = fuzzy_result.err().or_else(|| exact_result.err())
+            && let Some(error) = store_fuzzy.err().or_else(|| store_exact.err())
         {
             self.error = Some(error.to_string());
         }
@@ -1523,18 +959,12 @@ impl App {
     pub fn clear_search(&mut self) {
         self.search_query.clear();
         self.store_results.clear();
+        self.local_file_results.clear();
         self.showing_results = false;
         self.list_state.select(Some(0));
     }
 
-    pub fn connection_items(&self) -> Vec<ConnectionItem> {
-        let Some(snap) = self.selected_snap() else {
-            return vec![];
-        };
-        self.connection_items_for_snap(&snap.name)
-    }
-
-    fn connection_items_for_snap(&self, snap_name: &str) -> Vec<ConnectionItem> {
+    pub(crate) fn connection_items_for_snap(&self, snap_name: &str) -> Vec<ConnectionItem> {
         let mut items = Vec::new();
         for interface in &self.snap_interfaces {
             for plug in interface
@@ -1596,7 +1026,7 @@ impl App {
     }
 }
 
-fn empty_channel_info() -> ChannelSnapInfo {
+pub(crate) fn empty_channel_info() -> ChannelSnapInfo {
     ChannelSnapInfo {
         revision: None,
         confinement: None,
@@ -1607,7 +1037,7 @@ fn empty_channel_info() -> ChannelSnapInfo {
     }
 }
 
-fn channel_sort_key(channel: &str) -> (u8, String, u8, String) {
+pub(crate) fn channel_sort_key(channel: &str) -> (u8, String, u8, String) {
     let mut parts = channel.split('/');
     let first = parts.next().unwrap_or_default();
     let second = parts.next();
@@ -1625,6 +1055,16 @@ fn channel_sort_key(channel: &str) -> (u8, String, u8, String) {
     };
 
     (track_rank, track.to_string(), risk_rank, branch)
+}
+
+fn sort_group(s: &DisplaySnap) -> u8 {
+    if s.installed {
+        0
+    } else if s.is_local_file {
+        1
+    } else {
+        2
+    }
 }
 
 /// Score a snap against a search query. Lower = better match.
@@ -1669,23 +1109,5 @@ fn match_quality(name: &str, title: Option<&str>, summary: Option<&str>, query: 
 }
 
 fn open_url(url: &str) {
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-}
-
-/// Sort changes most-recent-first, with in-progress (not ready) changes floated to the top.
-/// Falls back to lexicographic comparison of spawn_time strings, which works correctly for
-/// ISO 8601 / RFC 3339 timestamps.
-fn sort_changes(changes: &mut [Change]) {
-    changes.sort_by(|a, b| {
-        // In-progress before finished
-        let a_active = !a.ready;
-        let b_active = !b.ready;
-        b_active.cmp(&a_active).then_with(|| {
-            // Most recent first
-            b.spawn_time
-                .as_deref()
-                .unwrap_or("")
-                .cmp(a.spawn_time.as_deref().unwrap_or(""))
-        })
-    });
+    crate::types::open_url(url);
 }

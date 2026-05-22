@@ -1,0 +1,24 @@
+name: snap-rat
+base: core24
+version: "0.1.0"
+summary: Terminal UI snap manager
+description: |
+  snap-rat is a terminal UI for browsing and managing snaps.
+grade: devel
+confinement: strict
+plugs:
+  snapd:
+    interface: snapd-control
+apps:
+  snap-rat:
+    command: bin/snap-rat
+    plugs:
+      - snapd
+      - home
+parts:
+  snap-rat-bin:
+    plugin: rust
+    source: .
+    rust-path:
+      - snap-rat
+    rust-channel: 'stable'

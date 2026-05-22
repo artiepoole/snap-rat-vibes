@@ -1,12 +1,11 @@
 name: build-essential
-version: '0.1'      # just for humans. Semantic versioning is recommended
-summary: build-essential    # 79 char long summary
+version: '0.1' # just for humans. Semantic versioning is recommended
+summary: build-essential # 79 char long summary
 description: |
   build-essential for rust system deps
-license: GPL-3.0    # your SDK's SPDX license
-platforms:          # The platforms this SDK should be built on and run on
+license: GPL-3.0 # your SDK's SPDX license
+platforms: # The platforms this SDK should be built on and run on
   ubuntu@24.04:amd64:
-
 parts:
   nil:
     plugin: nil

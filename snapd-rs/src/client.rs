@@ -167,6 +167,21 @@ impl SnapdClient {
         self.execute_async(req).await
     }
 
+    pub(crate) async fn post_multipart_async(
+        &self,
+        path: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<ChangeId> {
+        let req = self.build_request(
+            Method::POST,
+            path,
+            Bytes::copy_from_slice(body),
+            Some(content_type),
+        )?;
+        self.execute_async(req).await
+    }
+
     pub(crate) async fn put<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,

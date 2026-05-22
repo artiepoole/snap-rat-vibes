@@ -90,6 +90,59 @@ impl SnapdClient {
         .await
     }
 
+    pub async fn sideload_snap(&self, path: &str) -> Result<ChangeId> {
+        self.sideload_snap_inner(path, false).await
+    }
+
+    pub async fn sideload_snap_classic(&self, path: &str) -> Result<ChangeId> {
+        self.sideload_snap_inner(path, true).await
+    }
+
+    async fn sideload_snap_inner(&self, path: &str, classic: bool) -> Result<ChangeId> {
+        let data = tokio::fs::read(path).await?;
+        let boundary = "snapd-rs-sideload-boundary";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("snap.snap");
+
+        let mut body = Vec::new();
+        // dangerous flag
+        body.extend_from_slice(b"--");
+        body.extend_from_slice(boundary.as_bytes());
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"dangerous\"\r\n");
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(b"true\r\n");
+        // classic flag (if needed)
+        if classic {
+            body.extend_from_slice(b"--");
+            body.extend_from_slice(boundary.as_bytes());
+            body.extend_from_slice(b"\r\n");
+            body.extend_from_slice(b"Content-Disposition: form-data; name=\"classic\"\r\n");
+            body.extend_from_slice(b"\r\n");
+            body.extend_from_slice(b"true\r\n");
+        }
+        // snap file
+        body.extend_from_slice(b"--");
+        body.extend_from_slice(boundary.as_bytes());
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"snap\"; filename=\"");
+        body.extend_from_slice(filename.as_bytes());
+        body.extend_from_slice(b"\"\r\n");
+        body.extend_from_slice(b"Content-Type: application/octet-stream\r\n");
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(&data);
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(b"--");
+        body.extend_from_slice(boundary.as_bytes());
+        body.extend_from_slice(b"--\r\n");
+
+        let content_type = format!("multipart/form-data; boundary={}", boundary);
+        self.post_multipart_async("/v2/snaps", &body, &content_type)
+            .await
+    }
+
     pub async fn install_snap_classic(
         &self,
         name: &str,
@@ -109,6 +162,14 @@ impl SnapdClient {
     pub async fn remove_snap(&self, name: &str) -> Result<ChangeId> {
         self.post_async(&format!("/v2/snaps/{name}"), &json!({ "action": "remove" }))
             .await
+    }
+
+    pub async fn remove_snap_purge(&self, name: &str) -> Result<ChangeId> {
+        self.post_async(
+            &format!("/v2/snaps/{name}"),
+            &json!({ "action": "remove", "purge": true }),
+        )
+        .await
     }
 
     pub async fn refresh_snap(&self, name: &str, channel: Option<&str>) -> Result<ChangeId> {
