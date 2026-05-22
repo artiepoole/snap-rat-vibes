@@ -1,6 +1,8 @@
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -12,7 +14,7 @@ use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulPro
 use snapd_rs::{Change, ChangeStatus, SnapConfinement, api::snaps::Snap, api::store::StoreSnap};
 
 mod app;
-use app::{App, AppMode, ConnectionItem, ManageAction};
+use app::{App, AppMode, ConfirmPending, ConnectionItem, ManageAction};
 
 /// Re-exec the current process under `sudo` if we are not already root.
 ///
@@ -49,7 +51,9 @@ fn maybe_elevate() {
 async fn main() -> anyhow::Result<()> {
     maybe_elevate();
     let terminal = ratatui::init();
+    crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
     let result = run(terminal).await;
+    crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
     ratatui::restore();
     result
 }
@@ -62,181 +66,538 @@ async fn run(mut terminal: DefaultTerminal) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| ui(frame, &mut app))?;
 
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.kind != KeyEventKind::Press {
-                app.tick().await;
-                continue;
-            }
-            // Ctrl-C always quits
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                break;
-            }
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind != KeyEventKind::Press {
+                        app.tick().await;
+                        continue;
+                    }
+                    // Ctrl-C always quits
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        break;
+                    }
 
-            // Double-tap Esc quits (within 400 ms)
-            if key.code == KeyCode::Esc && !app.search_focused && app.mode == AppMode::Browse {
-                if last_esc.is_some_and(|t| t.elapsed() < Duration::from_millis(400)) {
-                    break;
+                    // q always quits (except when typing in search or channel input)
+                    if key.code == KeyCode::Char('q')
+                        && !app.search_focused
+                        && !matches!(app.mode, AppMode::ChannelInput)
+                    {
+                        break;
+                    }
+
+                    // h toggles help from anywhere (except text input modes)
+                    if key.code == KeyCode::Char('h')
+                        && !app.search_focused
+                        && !matches!(app.mode, AppMode::ChannelInput)
+                    {
+                        app.show_help = !app.show_help;
+                        continue;
+                    }
+
+                    // s/c switch tabs from Browse or Changes (not when typing or in overlays)
+                    if !app.search_focused
+                        && !matches!(app.mode, AppMode::ChannelInput)
+                        && matches!(app.mode, AppMode::Browse | AppMode::Changes)
+                    {
+                        if key.code == KeyCode::Char('c') && app.mode != AppMode::Changes {
+                            app.mode = AppMode::Changes;
+                            app.load_changes().await;
+                            continue;
+                        }
+                        if key.code == KeyCode::Char('s') && app.mode == AppMode::Changes {
+                            app.mode = AppMode::Browse;
+                            continue;
+                        }
+                    }
+
+                    // Esc dismisses help if open
+                    if app.show_help {
+                        if key.code == KeyCode::Esc {
+                            app.show_help = false;
+                        }
+                        continue;
+                    }
+
+                    // Double-tap Esc quits (within 400 ms)
+                    if key.code == KeyCode::Esc
+                        && !app.search_focused
+                        && app.mode == AppMode::Browse
+                    {
+                        if last_esc.is_some_and(|t| t.elapsed() < Duration::from_millis(400)) {
+                            break;
+                        }
+                        last_esc = Some(Instant::now());
+                    } else {
+                        last_esc = None;
+                    }
+
+                    match app.mode {
+                        AppMode::Browse => match key.code {
+                            KeyCode::Tab => app.toggle_focus(),
+                            KeyCode::Char('/') if !app.search_focused => {
+                                app.search_focused = true;
+                            }
+                            KeyCode::Enter | KeyCode::Right if app.search_focused => {
+                                app.search_focused = false;
+                                app.perform_search().await;
+                            }
+                            KeyCode::Enter | KeyCode::Right if !app.search_focused => {
+                                app.open_manage();
+                                if let Some(snap) = app.selected_snap()
+                                    && snap.installed
+                                {
+                                    let name = snap.name.clone();
+                                    app.load_snap_interfaces(&name).await;
+                                }
+                            }
+                            KeyCode::Esc | KeyCode::Left if app.search_focused => {
+                                app.search_focused = false;
+                            }
+                            KeyCode::Char(c) if app.search_focused => {
+                                app.search_query.push(c);
+                            }
+                            KeyCode::Char('p') if !app.search_focused => {
+                                app.toggle_changes_sidebar()
+                            }
+                            KeyCode::Backspace if app.search_focused => {
+                                app.search_query.pop();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.next(),
+                            KeyCode::Up | KeyCode::Char('k') => app.prev(),
+                            KeyCode::PageDown => app.page_down(),
+                            KeyCode::PageUp => app.page_up(),
+                            KeyCode::Char('i') if !app.search_focused => {
+                                app.toggle_installed_filter()
+                            }
+                            KeyCode::Char('r') if !app.search_focused => app.reload().await,
+                            KeyCode::Char('o') if !app.search_focused => app.cycle_sort(),
+                            _ => {}
+                        },
+                        AppMode::Manage => match key.code {
+                            KeyCode::Esc if app.connections_mode => app.close_connections_mode(),
+                            KeyCode::Esc | KeyCode::Left => app.close_manage(),
+                            KeyCode::Tab => app.toggle_connections_mode(),
+                            KeyCode::Enter | KeyCode::Right if app.connections_mode => {
+                                app.connections_activated = false;
+                                app.activate_selected_connection().await;
+                            }
+                            KeyCode::Enter | KeyCode::Right => {
+                                app.manage_activated = false;
+                                app.execute_selected_action().await;
+                            }
+                            KeyCode::Down | KeyCode::Char('j') if app.connections_mode => {
+                                app.connections_activated = false;
+                                app.connections_next()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.manage_activated = false;
+                                app.manage_next()
+                            }
+                            KeyCode::Up | KeyCode::Char('k') if app.connections_mode => {
+                                app.connections_activated = false;
+                                app.connections_prev()
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.manage_activated = false;
+                                app.manage_prev()
+                            }
+                            KeyCode::PageDown if app.connections_mode => {
+                                app.connections_page_down()
+                            }
+                            KeyCode::PageDown => {
+                                for _ in 0..10 {
+                                    app.manage_next();
+                                }
+                            }
+                            KeyCode::PageUp if app.connections_mode => app.connections_page_up(),
+                            KeyCode::PageUp => {
+                                for _ in 0..10 {
+                                    app.manage_prev();
+                                }
+                            }
+                            KeyCode::Char('p') => app.toggle_changes_sidebar(),
+                            KeyCode::Char('r') => {
+                                app.close_manage();
+                                app.reload().await;
+                            }
+                            _ => {}
+                        },
+                        AppMode::ChannelPicker => match key.code {
+                            KeyCode::Esc | KeyCode::Left => app.close_channel_picker(),
+                            KeyCode::Enter | KeyCode::Right => app.confirm_channel_pick().await,
+                            KeyCode::Down | KeyCode::Char('j') => app.channel_picker_next(),
+                            KeyCode::Up | KeyCode::Char('k') => app.channel_picker_prev(),
+                            KeyCode::Char('n') => app.open_custom_channel_input(),
+                            _ => {}
+                        },
+                        AppMode::ChannelInput => match key.code {
+                            KeyCode::Esc | KeyCode::Left => app.close_channel_input(),
+                            KeyCode::Enter | KeyCode::Right => app.execute_channel_action().await,
+                            KeyCode::Char(c) => app.channel_input.push(c),
+                            KeyCode::Backspace => {
+                                app.channel_input.pop();
+                            }
+                            _ => {}
+                        },
+                        AppMode::ClassicConfirm => match key.code {
+                            KeyCode::Esc | KeyCode::Left | KeyCode::Char('n') => {
+                                app.cancel_classic()
+                            }
+                            KeyCode::Enter | KeyCode::Right | KeyCode::Char('y') => {
+                                app.confirm_classic().await
+                            }
+                            _ => {}
+                        },
+                        AppMode::SlotPicker => match key.code {
+                            KeyCode::Esc | KeyCode::Left => app.close_slot_picker(),
+                            KeyCode::Enter | KeyCode::Right => app.confirm_slot_pick().await,
+                            KeyCode::Down | KeyCode::Char('j') => app.slot_picker_next(),
+                            KeyCode::Up | KeyCode::Char('k') => app.slot_picker_prev(),
+                            KeyCode::PageDown => app.slot_picker_next(),
+                            KeyCode::PageUp => app.slot_picker_prev(),
+                            _ => {}
+                        },
+                        AppMode::Changes => match key.code {
+                            KeyCode::Char('s') | KeyCode::Esc | KeyCode::Left => {
+                                app.mode = AppMode::Browse
+                            }
+                            KeyCode::Tab => app.changes_focus_detail = !app.changes_focus_detail,
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if app.changes_focus_detail {
+                                    app.changes_detail_next();
+                                } else {
+                                    app.changes_next();
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if app.changes_focus_detail {
+                                    app.changes_detail_prev();
+                                } else {
+                                    app.changes_prev();
+                                }
+                            }
+                            KeyCode::PageDown => {
+                                for _ in 0..10 {
+                                    if app.changes_focus_detail {
+                                        app.changes_detail_next();
+                                    } else {
+                                        app.changes_next();
+                                    }
+                                }
+                            }
+                            KeyCode::PageUp => {
+                                for _ in 0..10 {
+                                    if app.changes_focus_detail {
+                                        app.changes_detail_prev();
+                                    } else {
+                                        app.changes_prev();
+                                    }
+                                }
+                            }
+                            KeyCode::Char('a') => app.abort_selected_change().await,
+                            KeyCode::Char('p') => app.toggle_changes_sidebar(),
+                            KeyCode::Char('r') => app.load_changes().await,
+                            _ => {}
+                        },
+                        AppMode::Confirm => match key.code {
+                            KeyCode::Esc | KeyCode::Char('n') => {
+                                app.cancel_confirm();
+                            }
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                app.confirm_hovered = Some(true); // move to Yes
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                app.confirm_hovered = Some(false); // move to No
+                            }
+                            KeyCode::Char('y') => {
+                                app.execute_confirm().await;
+                            }
+                            KeyCode::Enter => match app.confirm_hovered {
+                                Some(true) => app.execute_confirm().await,
+                                _ => app.cancel_confirm(),
+                            },
+                            _ => {}
+                        },
+                    }
                 }
-                last_esc = Some(Instant::now());
-            } else {
-                last_esc = None;
-            }
-
-            match app.mode {
-                AppMode::Browse => match key.code {
-                    KeyCode::Char('q') if !app.search_focused => break,
-                    KeyCode::Tab => app.toggle_focus(),
-                    KeyCode::Char('/') if !app.search_focused => {
-                        app.search_focused = true;
-                    }
-                    KeyCode::Enter | KeyCode::Right if app.search_focused => {
-                        app.search_focused = false;
-                        app.perform_search().await;
-                    }
-                    KeyCode::Enter | KeyCode::Right if !app.search_focused => {
-                        app.open_manage();
-                        if let Some(snap) = app.selected_snap()
-                            && snap.installed
-                        {
-                            let name = snap.name.clone();
-                            app.load_snap_interfaces(&name).await;
-                        }
-                    }
-                    KeyCode::Esc | KeyCode::Left if app.search_focused => {
-                        app.search_focused = false;
-                    }
-                    KeyCode::Char(c) if app.search_focused => {
-                        app.search_query.push(c);
-                    }
-                    KeyCode::Char('c') if !app.search_focused => {
-                        app.mode = AppMode::Changes;
-                        app.load_changes().await;
-                    }
-                    KeyCode::Char('p') if !app.search_focused => app.toggle_changes_sidebar(),
-                    KeyCode::Backspace if app.search_focused => {
-                        app.search_query.pop();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => app.next(),
-                    KeyCode::Up | KeyCode::Char('k') => app.prev(),
-                    KeyCode::PageDown => app.page_down(),
-                    KeyCode::PageUp => app.page_up(),
-                    KeyCode::Char('i') if !app.search_focused => app.toggle_installed_filter(),
-                    KeyCode::Char('r') if !app.search_focused => app.reload().await,
-                    KeyCode::Char('s') if !app.search_focused => app.cycle_sort(),
-                    _ => {}
-                },
-                AppMode::Manage => match key.code {
-                    KeyCode::Esc if app.connections_mode => app.close_connections_mode(),
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left => app.close_manage(),
-                    KeyCode::Tab => app.toggle_connections_mode(),
-                    KeyCode::Enter | KeyCode::Right if app.connections_mode => {
-                        app.activate_selected_connection().await;
-                    }
-                    KeyCode::Enter => app.execute_selected_action().await,
-                    KeyCode::Down | KeyCode::Char('j') if app.connections_mode => {
-                        app.connections_next()
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => app.manage_next(),
-                    KeyCode::Up | KeyCode::Char('k') if app.connections_mode => {
-                        app.connections_prev()
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => app.manage_prev(),
-                    KeyCode::PageDown if app.connections_mode => app.connections_page_down(),
-                    KeyCode::PageDown => {
-                        for _ in 0..10 {
-                            app.manage_next();
-                        }
-                    }
-                    KeyCode::PageUp if app.connections_mode => app.connections_page_up(),
-                    KeyCode::PageUp => {
-                        for _ in 0..10 {
-                            app.manage_prev();
-                        }
-                    }
-                    KeyCode::Char('p') => app.toggle_changes_sidebar(),
-                    KeyCode::Char('r') => {
-                        app.close_manage();
-                        app.reload().await;
-                    }
-                    _ => {}
-                },
-                AppMode::ChannelPicker => match key.code {
-                    KeyCode::Esc | KeyCode::Left => app.close_channel_picker(),
-                    KeyCode::Enter | KeyCode::Right => app.confirm_channel_pick().await,
-                    KeyCode::Down | KeyCode::Char('j') => app.channel_picker_next(),
-                    KeyCode::Up | KeyCode::Char('k') => app.channel_picker_prev(),
-                    KeyCode::Char('n') => app.open_custom_channel_input(),
-                    _ => {}
-                },
-                AppMode::ChannelInput => match key.code {
-                    KeyCode::Esc | KeyCode::Left => app.close_channel_input(),
-                    KeyCode::Enter | KeyCode::Right => app.execute_channel_action().await,
-                    KeyCode::Char(c) => app.channel_input.push(c),
-                    KeyCode::Backspace => {
-                        app.channel_input.pop();
-                    }
-                    _ => {}
-                },
-                AppMode::ClassicConfirm => match key.code {
-                    KeyCode::Esc | KeyCode::Left | KeyCode::Char('n') | KeyCode::Char('q') => {
-                        app.cancel_classic()
-                    }
-                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('y') => {
-                        app.confirm_classic().await
-                    }
-                    _ => {}
-                },
-                AppMode::SlotPicker => match key.code {
-                    KeyCode::Esc | KeyCode::Left => app.close_slot_picker(),
-                    KeyCode::Enter | KeyCode::Right => app.confirm_slot_pick().await,
-                    KeyCode::Down | KeyCode::Char('j') => app.slot_picker_next(),
-                    KeyCode::Up | KeyCode::Char('k') => app.slot_picker_prev(),
-                    KeyCode::PageDown => app.slot_picker_next(),
-                    KeyCode::PageUp => app.slot_picker_prev(),
-                    _ => {}
-                },
-                AppMode::Changes => match key.code {
-                    KeyCode::Char('c') | KeyCode::Esc | KeyCode::Left => app.mode = AppMode::Browse,
-                    KeyCode::Tab => app.changes_focus_detail = !app.changes_focus_detail,
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if app.changes_focus_detail {
-                            app.changes_detail_next();
-                        } else {
-                            app.changes_next();
-                        }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if app.changes_focus_detail {
-                            app.changes_detail_prev();
-                        } else {
-                            app.changes_prev();
-                        }
-                    }
-                    KeyCode::PageDown => {
-                        for _ in 0..10 {
-                            if app.changes_focus_detail {
-                                app.changes_detail_next();
-                            } else {
-                                app.changes_next();
+                Event::Mouse(mouse) => {
+                    let col = mouse.column;
+                    let row = mouse.row;
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => match app.mode {
+                            AppMode::Browse => app.next(),
+                            AppMode::Manage if app.connections_mode => app.connections_next(),
+                            AppMode::Manage => app.manage_next(),
+                            AppMode::ChannelPicker => app.channel_picker_next(),
+                            AppMode::SlotPicker => app.slot_picker_next(),
+                            AppMode::Changes => {
+                                let in_detail = app
+                                    .changes_detail_area
+                                    .is_some_and(|a| rect_contains(a, col, row));
+                                if in_detail || app.changes_focus_detail {
+                                    app.changes_detail_next();
+                                } else {
+                                    app.changes_next();
+                                }
                             }
-                        }
-                    }
-                    KeyCode::PageUp => {
-                        for _ in 0..10 {
-                            if app.changes_focus_detail {
-                                app.changes_detail_prev();
-                            } else {
-                                app.changes_prev();
+                            _ => {}
+                        },
+                        MouseEventKind::ScrollUp => match app.mode {
+                            AppMode::Browse => app.prev(),
+                            AppMode::Manage if app.connections_mode => app.connections_prev(),
+                            AppMode::Manage => app.manage_prev(),
+                            AppMode::ChannelPicker => app.channel_picker_prev(),
+                            AppMode::SlotPicker => app.slot_picker_prev(),
+                            AppMode::Changes => {
+                                let in_detail = app
+                                    .changes_detail_area
+                                    .is_some_and(|a| rect_contains(a, col, row));
+                                if in_detail || app.changes_focus_detail {
+                                    app.changes_detail_prev();
+                                } else {
+                                    app.changes_prev();
+                                }
                             }
+                            _ => {}
+                        },
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            // Help dialog: click outside to close.
+                            if app.show_help {
+                                if !app.help_area.is_some_and(|a| rect_contains(a, col, row)) {
+                                    app.show_help = false;
+                                }
+                                continue;
+                            }
+                            // Confirm dialog intercepts all clicks first.
+                            if app.mode == AppMode::Confirm {
+                                let on_yes = app
+                                    .confirm_yes_area
+                                    .is_some_and(|a| rect_contains(a, col, row));
+                                let on_no = app
+                                    .confirm_no_area
+                                    .is_some_and(|a| rect_contains(a, col, row));
+                                if on_yes {
+                                    if app.confirm_hovered == Some(true) {
+                                        app.execute_confirm().await;
+                                    } else {
+                                        app.confirm_hovered = Some(true);
+                                    }
+                                } else if on_no {
+                                    if app.confirm_hovered == Some(false) {
+                                        app.cancel_confirm();
+                                    } else {
+                                        app.confirm_hovered = Some(false);
+                                    }
+                                } else {
+                                    app.cancel_confirm();
+                                }
+                            } else if app.mode == AppMode::ChannelPicker {
+                                if let Some(area) = app.channel_picker_area {
+                                    if rect_contains(area, col, row) {
+                                        let offset = app.channel_picker_state.offset();
+                                        if let Some(idx) = list_row_to_index(area, row, offset)
+                                            && idx < app.available_channels.len()
+                                        {
+                                            if app.channel_picker_state.selected() == Some(idx) {
+                                                app.confirm_channel_pick().await;
+                                            } else {
+                                                app.channel_picker_state.select(Some(idx));
+                                            }
+                                        }
+                                    } else {
+                                        app.close_channel_picker();
+                                    }
+                                }
+                            } else if app.mode == AppMode::ChannelInput {
+                                if !app
+                                    .channel_input_area
+                                    .is_some_and(|a| rect_contains(a, col, row))
+                                {
+                                    app.close_channel_input();
+                                }
+                            } else if app.mode == AppMode::ClassicConfirm {
+                                if !app
+                                    .classic_confirm_area
+                                    .is_some_and(|a| rect_contains(a, col, row))
+                                {
+                                    app.cancel_classic();
+                                }
+                            } else if app.mode == AppMode::SlotPicker {
+                                if let Some(area) = app.slot_picker_area {
+                                    if rect_contains(area, col, row) {
+                                        let offset = app.slot_picker_state.offset();
+                                        if let Some(idx) = list_row_to_index(area, row, offset)
+                                            && idx < app.slot_picker_items.len()
+                                        {
+                                            if app.slot_picker_state.selected() == Some(idx) {
+                                                app.confirm_slot_pick().await;
+                                            } else {
+                                                app.slot_picker_state.select(Some(idx));
+                                            }
+                                        }
+                                    } else {
+                                        app.close_slot_picker();
+                                    }
+                                }
+                            } else {
+                                // Tab bar clicks work from any non-overlay mode.
+                                {
+                                    if app
+                                        .snaps_tab_area
+                                        .is_some_and(|a| rect_contains(a, col, row))
+                                    {
+                                        match app.mode {
+                                            AppMode::Changes => app.mode = AppMode::Browse,
+                                            AppMode::Manage => app.close_manage(),
+                                            _ => {}
+                                        }
+                                    } else if app
+                                        .changes_tab_area
+                                        .is_some_and(|a| rect_contains(a, col, row))
+                                    {
+                                        if app.mode != AppMode::Changes {
+                                            app.mode = AppMode::Changes;
+                                            app.load_changes().await;
+                                        }
+                                    } else {
+                                        match app.mode {
+                                            AppMode::Browse => {
+                                                if let Some(area) = app.search_area
+                                                    && rect_contains(area, col, row)
+                                                {
+                                                    app.search_focused = true;
+                                                } else if let Some(area) = app.snap_list_area
+                                                    && rect_contains(area, col, row)
+                                                {
+                                                    let offset = app.list_state.offset();
+                                                    if let Some(idx) =
+                                                        list_row_to_index(area, row, offset)
+                                                        && idx < app.display_snaps().len()
+                                                    {
+                                                        if app.list_state.selected() == Some(idx) {
+                                                            // Second click on already-selected item: open manage.
+                                                            app.open_manage();
+                                                            if let Some(snap) = app.selected_snap()
+                                                                && snap.installed
+                                                            {
+                                                                let name = snap.name.clone();
+                                                                app.load_snap_interfaces(&name)
+                                                                    .await;
+                                                            }
+                                                        } else {
+                                                            app.list_state.select(Some(idx));
+                                                            app.search_focused = false;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            AppMode::Manage => {
+                                                if let Some(area) = app.manage_actions_area
+                                                    && rect_contains(area, col, row)
+                                                {
+                                                    let offset = app.manage_state.offset();
+                                                    if let Some(idx) =
+                                                        list_row_to_index(area, row, offset)
+                                                        && idx < app.manage_actions.len()
+                                                    {
+                                                        app.connections_mode = false;
+                                                        // Keep connections ghost position
+                                                        let already_selected =
+                                                            app.manage_state.selected()
+                                                                == Some(idx);
+                                                        app.manage_state.select(Some(idx));
+                                                        if already_selected && !app.manage_activated
+                                                        {
+                                                            // Second explicit click on same item: execute
+                                                            app.execute_selected_action().await;
+                                                        } else {
+                                                            // First click (or activated state): just select
+                                                            app.manage_activated = false;
+                                                            app.connections_activated = false;
+                                                        }
+                                                    }
+                                                } else if let Some(inner) =
+                                                    app.connections_inner_area
+                                                    && rect_contains(inner, col, row)
+                                                {
+                                                    let offset = app.connections_state.offset();
+                                                    if let Some(idx) =
+                                                        inner_list_row_to_index(inner, row, offset)
+                                                        && idx < app.connection_items().len()
+                                                    {
+                                                        app.connections_mode = true;
+                                                        // Keep manage ghost position
+                                                        let already_selected =
+                                                            app.connections_state.selected()
+                                                                == Some(idx);
+                                                        app.connections_state.select(Some(idx));
+                                                        if already_selected
+                                                            && !app.connections_activated
+                                                        {
+                                                            // Second explicit click: activate (with confirm)
+                                                            app.activate_selected_connection()
+                                                                .await;
+                                                        } else {
+                                                            // First click: just select
+                                                            app.connections_activated = false;
+                                                            app.manage_activated = false;
+                                                        }
+                                                    }
+                                                } else if app
+                                                    .left_pane_area
+                                                    .is_some_and(|a| rect_contains(a, col, row))
+                                                {
+                                                    if let Some(area) = app.snap_list_area
+                                                        && rect_contains(area, col, row)
+                                                    {
+                                                        let offset = app.list_state.offset();
+                                                        if let Some(idx) =
+                                                            list_row_to_index(area, row, offset)
+                                                            && idx < app.display_snaps().len()
+                                                        {
+                                                            app.list_state.select(Some(idx));
+                                                        }
+                                                    }
+                                                    app.close_manage();
+                                                }
+                                            }
+                                            AppMode::ChannelPicker
+                                            | AppMode::ChannelInput
+                                            | AppMode::ClassicConfirm
+                                            | AppMode::SlotPicker => {
+                                                // handled above before the in_overlay check
+                                            }
+                                            AppMode::Changes => {
+                                                if let Some(area) = app.changes_list_area
+                                                    && rect_contains(area, col, row)
+                                                {
+                                                    let offset = app.changes_list_state.offset();
+                                                    if let Some(idx) =
+                                                        list_row_to_index(area, row, offset)
+                                                        && idx < app.changes_list.len()
+                                                    {
+                                                        app.changes_list_state.select(Some(idx));
+                                                        app.changes_focus_detail = false;
+                                                    }
+                                                } else if let Some(area) = app.changes_detail_area
+                                                    && rect_contains(area, col, row)
+                                                {
+                                                    app.changes_focus_detail = true;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            } // end else (not Confirm mode)
                         }
+                        _ => {}
                     }
-                    KeyCode::Char('a') => app.abort_selected_change().await,
-                    KeyCode::Char('p') => app.toggle_changes_sidebar(),
-                    KeyCode::Char('r') => app.load_changes().await,
-                    _ => {}
-                },
+                }
+                _ => {}
             }
         }
 
@@ -244,6 +605,33 @@ async fn run(mut terminal: DefaultTerminal) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Returns true if (col, row) lies inside `rect`.
+fn rect_contains(rect: ratatui::layout::Rect, col: u16, row: u16) -> bool {
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
+}
+
+/// Maps a mouse row to a list-item index for a widget rendered with a single-row
+/// border on each side (the standard ratatui `Block` with `Borders::ALL`).
+fn list_row_to_index(area: ratatui::layout::Rect, row: u16, offset: usize) -> Option<usize> {
+    let inner_y = area.y + 1;
+    let inner_end = area.y + area.height.saturating_sub(1);
+    if row >= inner_y && row < inner_end {
+        Some((row - inner_y) as usize + offset)
+    } else {
+        None
+    }
+}
+
+/// Maps a mouse row to a list-item index for a list rendered directly into an
+/// inner area (border/padding already removed before passing to the widget).
+fn inner_list_row_to_index(inner: ratatui::layout::Rect, row: u16, offset: usize) -> Option<usize> {
+    if row >= inner.y && row < inner.y + inner.height {
+        Some((row - inner.y) as usize + offset)
+    } else {
+        None
+    }
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -258,7 +646,12 @@ fn ui(frame: &mut Frame, app: &mut App) {
     if app.mode == AppMode::Changes {
         let (list_area, detail_area, sidebar_area) =
             split_main_columns(outer[0], show_wide_sidebar);
-        render_changes_screen(frame, app, list_area, detail_area);
+        let left_pane = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(list_area);
+        render_tabs(frame, app, left_pane[0]);
+        render_changes_screen(frame, app, left_pane[1], detail_area);
         render_status_bar(frame, app, outer[1]);
 
         if let Some(sidebar_area) = sidebar_area {
@@ -272,13 +665,19 @@ fn ui(frame: &mut Frame, app: &mut App) {
     }
 
     let (list_area, main_area, sidebar_area) = split_main_columns(outer[0], show_wide_sidebar);
+    app.left_pane_area = Some(list_area);
     let list_pane = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Min(0),
+        ])
         .split(list_area);
 
-    render_search(frame, app, list_pane[0]);
-    render_list(frame, app, list_pane[1]);
+    render_tabs(frame, app, list_pane[0]);
+    render_search(frame, app, list_pane[1]);
+    render_list(frame, app, list_pane[2]);
 
     match app.mode {
         AppMode::Browse => render_detail(frame, app, main_area),
@@ -286,6 +685,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         | AppMode::ChannelPicker
         | AppMode::ChannelInput
         | AppMode::ClassicConfirm
+        | AppMode::Confirm
         | AppMode::SlotPicker => render_manage(frame, app, main_area),
         AppMode::Changes => unreachable!(),
     }
@@ -311,6 +711,13 @@ fn ui(frame: &mut Frame, app: &mut App) {
     }
     if app.mode == AppMode::SlotPicker {
         render_slot_picker(frame, app);
+    }
+    if app.mode == AppMode::Confirm {
+        render_confirm(frame, app);
+    }
+    // Help overlay renders on top of everything.
+    if app.show_help {
+        render_help(frame, app);
     }
 }
 
@@ -349,6 +756,8 @@ fn sidebar_overlay_rect(area: Rect) -> Rect {
 }
 
 fn render_changes_screen(frame: &mut Frame, app: &mut App, list_area: Rect, detail_area: Rect) {
+    app.changes_list_area = Some(list_area);
+    app.changes_detail_area = Some(detail_area);
     let list_block = Block::default()
         .title(" Changes ")
         .borders(Borders::ALL)
@@ -506,7 +915,50 @@ fn render_changes_screen(frame: &mut Frame, app: &mut App, list_area: Rect, deta
     }
 }
 
-fn render_search(frame: &mut Frame, app: &App, area: Rect) {
+fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let is_changes = app.mode == AppMode::Changes;
+
+    let tab_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    app.snaps_tab_area = Some(tab_layout[0]);
+    app.changes_tab_area = Some(tab_layout[1]);
+
+    let snaps_style = if !is_changes {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let changes_style = if is_changes {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(if !is_changes { "▶ " } else { "▷ " }, snaps_style),
+            Span::styled("[s]naps", snaps_style),
+        ])),
+        tab_layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(if is_changes { "▶ " } else { "▷ " }, changes_style),
+            Span::styled("[c]hanges", changes_style),
+        ])),
+        tab_layout[1],
+    );
+}
+
+fn render_search(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.search_area = Some(area);
     let border_style = if app.search_focused {
         Style::default().fg(Color::Yellow)
     } else {
@@ -539,34 +991,31 @@ fn render_search(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let list_focused = !app.search_focused;
-
+    app.snap_list_area = Some(area);
+    let list_active = app.mode == AppMode::Browse && !app.search_focused;
     let sort_label = app.sort_mode.label();
+    let order_hint = format!("[o]rder: {sort_label}");
     let title = if app.showing_results {
         if app.show_installed_only {
             format!(
-                " Installed from \"{}\" ({}) [{}] ",
+                " Installed from \"{}\" ({}) {} ",
                 app.search_query,
                 app.display_snaps().len(),
-                sort_label
+                order_hint
             )
         } else {
             format!(
-                " Results for \"{}\" ({}) [{}] ",
+                " Results for \"{}\" ({}) {} ",
                 app.search_query,
                 app.store_results.len(),
-                sort_label
+                order_hint
             )
         }
     } else {
-        format!(
-            " Installed Snaps ({}) [{}] ",
-            app.installed.len(),
-            sort_label
-        )
+        format!(" Installed Snaps ({}) {} ", app.installed.len(), order_hint)
     };
 
-    let border_style = if list_focused {
+    let border_style = if list_active {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -582,12 +1031,14 @@ fn render_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
+        .highlight_style(if list_active {
             Style::default()
                 .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default() // ghost: arrow only, no background
+        })
+        .highlight_symbol(if list_active { "▶ " } else { "▷ " });
 
     frame.render_stateful_widget(list, area, &mut app.list_state);
 }
@@ -614,6 +1065,8 @@ fn snap_list_item(snap: &DisplaySnap) -> ListItem<'static> {
 }
 
 fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
+    frame.render_widget(Clear, area);
+
     let block = Block::default()
         .title(" Snap Details ")
         .borders(Borders::ALL)
@@ -860,29 +1313,108 @@ fn truncate_text(text: &str, max_chars: usize) -> String {
     truncated
 }
 
+fn render_help(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let popup = centered_popup(68, 40, area);
+    frame.render_widget(Clear, popup);
+    app.help_area = Some(popup);
+
+    let block = Block::default()
+        .title(" Help — Keybindings ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan))
+        .padding(Padding::symmetric(2, 1));
+
+    fn row<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
+        Line::from(vec![
+            Span::styled(
+                format!("{key:<22}"),
+                Style::default().fg(Color::Yellow).bold(),
+            ),
+            Span::raw(desc),
+        ])
+    }
+    fn section(title: &str) -> Line<'_> {
+        Line::from(Span::styled(
+            format!("── {title} "),
+            Style::default().fg(Color::DarkGray),
+        ))
+    }
+
+    let lines = vec![
+        section("Browse"),
+        row("↑ / k", "Move up in snap list"),
+        row("↓ / j", "Move down in snap list"),
+        row("→ / ↵ / Enter", "Open manage panel"),
+        row("← / Esc", "Close manage / cancel search"),
+        row("/", "Focus search bar"),
+        row("i", "Toggle installed-only filter"),
+        row("o", "Cycle sort order  ([o]rder: in title)"),
+        row("r", "Refresh snap list"),
+        row("c", "Switch to [c]hanges tab"),
+        row("s", "Switch to [s]naps tab (from Changes)"),
+        row("p", "Toggle changes sidebar"),
+        row("Click", "Select snap  (click again → manage)"),
+        Line::raw(""),
+        section("Manage — Actions pane"),
+        row("↑ / k  ↓ / j", "Navigate actions"),
+        row("→ / ↵ / Enter", "Select (1st click) then run (2nd)"),
+        row("← / Esc", "Close manage panel"),
+        row("Tab", "Switch to Connections pane"),
+        row("Click item", "Select (1st click) then run (2nd)"),
+        row("Click left pane", "Close manage panel"),
+        Line::raw(""),
+        section("Manage — Connections pane"),
+        row("↑ / k  ↓ / j", "Navigate connections"),
+        row("→ / ↵ / Enter", "Select then connect / disconnect"),
+        row("Tab", "Switch to Actions pane"),
+        row("Esc", "Return to Actions pane"),
+        row("Click item", "Select (1st click) then toggle (2nd)"),
+        Line::raw(""),
+        section("Confirm dialog"),
+        row("← / h", "Move to Yes"),
+        row("→ / l", "Move to No  (default)"),
+        row("↵ / Enter", "Confirm highlighted button"),
+        row("y", "Confirm yes immediately"),
+        row("n / Esc", "Cancel"),
+        row("Click button", "Highlight (click again to confirm)"),
+        row("Click outside", "Cancel"),
+        Line::raw(""),
+        section("Changes view"),
+        row("↑ / k  ↓ / j", "Navigate changes list"),
+        row("Tab", "Switch between list / task detail"),
+        row("a", "Abort selected change"),
+        row("r", "Refresh immediately (auto: every 3 s)"),
+        row("← / Esc / c", "Back to browse"),
+        Line::raw(""),
+        section("General"),
+        row("h", "Toggle this help dialog"),
+        row("Esc (×2 fast)", "Quit from browse"),
+        row("q", "Quit from anywhere"),
+        row("Ctrl-C", "Force quit"),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "  Press h, q, or Esc — or click outside — to close",
+            Style::default().fg(Color::DarkGray).italic(),
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let style = Style::default().bg(Color::DarkGray).fg(Color::White);
 
-    let help = match app.mode {
-        AppMode::Browse if app.search_focused => " Enter  confirm   Esc  cancel ",
-        AppMode::Browse => {
-            " /  search   ↑↓jk  navigate   Enter  manage   c  changes   p  changes sidebar   i  installed only   r  refresh   s  sort   q/Esc×2  quit "
-        }
-        AppMode::Manage if app.connections_mode => {
-            " ↑↓jk  navigate   Enter  connect/disconnect   Tab  actions   p  changes sidebar   Esc  back "
-        }
-        AppMode::Manage => {
-            " ↑↓jk  navigate   Enter  select   Tab  connections   p  changes sidebar   Esc  back "
-        }
-        AppMode::ChannelPicker => {
-            " ↑↓jk  navigate   Enter  select   n  custom channel   Esc  back "
-        }
-        AppMode::ChannelInput => " Type channel name   Enter  confirm   Esc  cancel ",
-        AppMode::ClassicConfirm => " y/Enter  install (classic)   n/Esc  cancel ",
-        AppMode::SlotPicker => " ↑↓jk  navigate   Enter  connect   Esc  cancel ",
-        AppMode::Changes => {
-            " ↑↓  navigate   Tab  switch pane   a  abort   p  changes sidebar   r  refresh   c/Esc  back "
-        }
+    let help = if app.search_focused {
+        " Enter  confirm   Esc  cancel "
+    } else {
+        " ↑↓←→  navigate   ↵  confirm   Esc  back   h  help   q  quit "
     };
 
     let indicator = if app.loading {
@@ -930,6 +1462,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Clear the entire area first to prevent stale terminal cells showing through
+    // when the layout changes (e.g. progress bar appearing/disappearing).
+    frame.render_widget(Clear, area);
+
     let snap = match app.selected_snap() {
         Some(s) => s,
         None => return,
@@ -1025,13 +1561,16 @@ fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let action_list = List::new(action_items)
         .block(action_block)
-        .highlight_style(
+        .highlight_style(if actions_focused {
             Style::default()
                 .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default() // ghost: arrow position visible, no background
+        })
+        .highlight_symbol(if actions_focused { "▶ " } else { "▷ " });
     frame.render_stateful_widget(action_list, panes[0], &mut app.manage_state);
+    app.manage_actions_area = Some(panes[0]);
 
     let connection_block = Block::default()
         .title(" Connections [Tab] actions ")
@@ -1044,6 +1583,7 @@ fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .padding(Padding::horizontal(1));
     let connection_inner = connection_block.inner(panes[1]);
+    app.connections_inner_area = Some(connection_inner);
     frame.render_widget(connection_block, panes[1]);
 
     if !snap.installed {
@@ -1065,12 +1605,14 @@ fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let items: Vec<ListItem> = connection_items.iter().map(connection_list_item).collect();
         let list = List::new(items)
-            .highlight_style(
+            .highlight_style(if app.connections_mode {
                 Style::default()
                     .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ ");
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default() // ghost
+            })
+            .highlight_symbol(if app.connections_mode { "▶ " } else { "▷ " });
         frame.render_stateful_widget(list, connection_inner, &mut app.connections_state);
     }
 
@@ -1166,6 +1708,7 @@ fn render_channel_picker(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let popup = centered_popup_percent(70, 60, area);
     frame.render_widget(Clear, popup);
+    app.channel_picker_area = Some(popup);
 
     let title = app
         .pending_channel_action
@@ -1230,6 +1773,7 @@ fn render_slot_picker(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let popup = centered_popup_percent(65, 55, area);
     frame.render_widget(Clear, popup);
+    app.slot_picker_area = Some(popup);
 
     let interface_name = app
         .slot_picker_plug
@@ -1277,10 +1821,11 @@ fn render_slot_picker(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, popup, &mut app.slot_picker_state);
 }
 
-fn render_channel_input(frame: &mut Frame, app: &App) {
+fn render_channel_input(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let popup = centered_popup(50, 3, area);
     frame.render_widget(Clear, popup);
+    app.channel_input_area = Some(popup);
 
     let action_label = app
         .pending_channel_action
@@ -1324,10 +1869,11 @@ fn format_progress(done: i64, total: i64) -> String {
     }
 }
 
-fn render_classic_confirm(frame: &mut Frame, app: &App) {
+fn render_classic_confirm(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let popup = centered_popup(60, 9, area);
     frame.render_widget(Clear, popup);
+    app.classic_confirm_area = Some(popup);
 
     let snap_name = app
         .classic_pending
@@ -1361,6 +1907,69 @@ fn render_classic_confirm(frame: &mut Frame, app: &App) {
             Span::raw("Install anyway"),
             Span::styled("     n / Esc  ", Style::default().fg(Color::Red).bold()),
             Span::raw("Cancel"),
+        ]),
+    ]);
+
+    frame.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn render_confirm(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let popup = centered_popup(62, 7, area);
+    frame.render_widget(Clear, popup);
+
+    let border_color = if matches!(
+        app.confirm_pending,
+        Some(ConfirmPending::Action(ManageAction::Uninstall))
+            | Some(ConfirmPending::Action(ManageAction::Revert))
+            | Some(ConfirmPending::Disconnect)
+    ) {
+        Color::Red
+    } else {
+        Color::Yellow
+    };
+
+    let block = Block::default()
+        .title(" ⚠  Confirm ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .padding(Padding::uniform(1));
+
+    let message = app.confirm_message.as_deref().unwrap_or("Are you sure?");
+
+    // Button row: inside border (1) + padding (1) = offset 2; message + blank = 2 rows → button row at y+4
+    let btn_y = popup.y + 4;
+    let inner_x = popup.x + 2;
+    // "  [ ✔ Confirm ]  " ~ 16 chars, "  [ ✘ Cancel ]  " ~ 15 chars, centred with a gap
+    let yes_label = "  [ ✔ Confirm ]  ";
+    let no_label = "  [ ✘ Cancel ]  ";
+    let yes_w = yes_label.chars().count() as u16;
+    let no_w = no_label.chars().count() as u16;
+    app.confirm_yes_area = Some(Rect::new(inner_x, btn_y, yes_w, 1));
+    app.confirm_no_area = Some(Rect::new(inner_x + yes_w + 1, btn_y, no_w, 1));
+
+    let yes_style = if app.confirm_hovered == Some(true) {
+        Style::default().fg(Color::Black).bg(Color::Green).bold()
+    } else {
+        Style::default().fg(Color::Green).bold()
+    };
+    let no_style = if app.confirm_hovered == Some(false) {
+        Style::default().fg(Color::Black).bg(Color::Red).bold()
+    } else {
+        Style::default().fg(Color::Red).bold()
+    };
+
+    let text = Text::from(vec![
+        Line::from(Span::styled(
+            message,
+            Style::default().fg(Color::White).bold(),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(yes_label, yes_style),
+            Span::raw(" "),
+            Span::styled(no_label, no_style),
         ]),
     ]);
 
@@ -1470,6 +2079,7 @@ pub struct DisplaySnap {
     pub icon_url: Option<String>,
     pub size: Option<u64>,
     pub installed: bool,
+    pub install_date: Option<String>,
 }
 
 impl From<&Snap> for DisplaySnap {
@@ -1490,6 +2100,7 @@ impl From<&Snap> for DisplaySnap {
             icon_url: s.icon.clone(),
             size: s.installed_size,
             installed: true,
+            install_date: s.install_date.clone(),
         }
     }
 }
@@ -1512,6 +2123,7 @@ impl From<&StoreSnap> for DisplaySnap {
             icon_url: s.icon.clone(),
             size: s.download_size.map(|value| value.max(0) as u64),
             installed: false,
+            install_date: None,
         }
     }
 }

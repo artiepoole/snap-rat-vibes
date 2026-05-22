@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use image::DynamicImage;
-use ratatui::widgets::ListState;
+use ratatui::{layout::Rect, widgets::ListState};
 use ratatui_image::picker::{Capability, Picker, ProtocolType, cap_parser::QueryStdioOptions};
 use snapd_rs::{
     Change, ChannelSnapInfo, SnapdClient, StoreSnap,
@@ -25,10 +26,22 @@ pub enum AppMode {
     Changes,
     /// Picking a slot to connect a plug to.
     SlotPicker,
+    /// Confirmation overlay for a destructive action (Uninstall, Revert,
+    /// Disable, or toggling a connection).
+    Confirm,
+}
+
+/// The action that will execute once the user confirms the `Confirm` dialog.
+#[derive(Debug, Clone)]
+pub enum ConfirmPending {
+    Action(ManageAction),
+    Connect,
+    Disconnect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SortMode {
+    Relevance,
     NameAsc,
     NameDesc,
     RevisionDesc,
@@ -37,9 +50,10 @@ pub enum SortMode {
 impl SortMode {
     pub fn label(&self) -> &'static str {
         match self {
+            SortMode::Relevance => "Relevance",
             SortMode::NameAsc => "A→Z",
             SortMode::NameDesc => "Z→A",
-            SortMode::RevisionDesc => "Newest",
+            SortMode::RevisionDesc => "Recently installed",
         }
     }
 }
@@ -109,14 +123,23 @@ pub struct App {
     pub mode: AppMode,
     pub manage_actions: Vec<ManageAction>,
     pub manage_state: ListState,
+    /// True from when the manage pane is opened until the user makes their first explicit
+    /// click/keypress to select an item. Used so the pre-selected index 0 doesn't count
+    /// as an "already selected" second click.
+    pub manage_activated: bool,
+    /// Same sentinel for the connections sub-pane.
+    pub connections_activated: bool,
     pub active_change_id: Option<String>,
     pub active_change: Option<Change>,
     pub show_changes_sidebar: bool,
+    pub show_help: bool,
     pub sidebar_changes: Vec<Change>,
     pub changes_list: Vec<Change>,
     pub changes_list_state: ListState,
     pub changes_detail_state: ListState,
     pub changes_focus_detail: bool,
+    /// When the Changes view was last polled, used to throttle background refreshes.
+    pub changes_last_polled: Option<Instant>,
     pub available_channels: Vec<(String, ChannelSnapInfo)>,
     pub channel_picker_state: ListState,
     pub channel_input: String,
@@ -141,6 +164,38 @@ pub struct App {
     pub icon_picker: Option<Picker>,
     pub icon_cache: HashMap<String, Option<DynamicImage>>,
     pub icon_fetching: HashSet<String>,
+
+    /// Pending action waiting for confirmation in `AppMode::Confirm`.
+    pub confirm_pending: Option<ConfirmPending>,
+    /// Human-readable message shown in the confirmation dialog.
+    pub confirm_message: Option<String>,
+    /// Clickable area for the Yes/Confirm button in the confirmation dialog.
+    pub confirm_yes_area: Option<Rect>,
+    /// Clickable area for the No/Cancel button in the confirmation dialog.
+    pub confirm_no_area: Option<Rect>,
+    /// Which confirm button is currently highlighted: Some(true)=yes, Some(false)=no, None=neither.
+    pub confirm_hovered: Option<bool>,
+
+    // Areas of interactive widgets, updated on every draw for mouse hit-testing.
+    pub snap_list_area: Option<Rect>,
+    pub search_area: Option<Rect>,
+    pub manage_actions_area: Option<Rect>,
+    /// Entire left pane (tabs + search + list), used so clicks outside the
+    /// manage area can close the manage panel.
+    pub left_pane_area: Option<Rect>,
+    /// Inner area of the connections list (border + padding already removed).
+    pub connections_inner_area: Option<Rect>,
+    pub channel_picker_area: Option<Rect>,
+    pub slot_picker_area: Option<Rect>,
+    pub channel_input_area: Option<Rect>,
+    pub classic_confirm_area: Option<Rect>,
+    pub changes_list_area: Option<Rect>,
+    pub changes_detail_area: Option<Rect>,
+    /// Clickable tab areas rendered at the top of the left pane.
+    pub snaps_tab_area: Option<Rect>,
+    pub changes_tab_area: Option<Rect>,
+    /// Area of the help dialog popup, used for click-outside-to-close.
+    pub help_area: Option<Rect>,
 }
 
 impl App {
@@ -163,14 +218,18 @@ impl App {
             mode: AppMode::Browse,
             manage_actions: vec![],
             manage_state: ListState::default(),
+            manage_activated: false,
+            connections_activated: false,
             active_change_id: None,
             active_change: None,
             show_changes_sidebar: false,
+            show_help: false,
             sidebar_changes: vec![],
             changes_list: vec![],
             changes_list_state: ListState::default(),
             changes_detail_state: ListState::default(),
             changes_focus_detail: false,
+            changes_last_polled: None,
             available_channels: vec![],
             channel_picker_state: ListState::default(),
             channel_input: String::new(),
@@ -223,6 +282,25 @@ impl App {
             }),
             icon_cache: HashMap::default(),
             icon_fetching: HashSet::default(),
+            confirm_pending: None,
+            confirm_message: None,
+            confirm_yes_area: None,
+            confirm_no_area: None,
+            confirm_hovered: None,
+            snap_list_area: None,
+            search_area: None,
+            manage_actions_area: None,
+            left_pane_area: None,
+            connections_inner_area: None,
+            channel_picker_area: None,
+            slot_picker_area: None,
+            channel_input_area: None,
+            classic_confirm_area: None,
+            changes_list_area: None,
+            changes_detail_area: None,
+            snaps_tab_area: None,
+            changes_tab_area: None,
+            help_area: None,
         }
     }
 
@@ -244,14 +322,17 @@ impl App {
 
     pub fn cycle_sort(&mut self) {
         self.sort_mode = match self.sort_mode {
+            SortMode::Relevance => SortMode::NameAsc,
             SortMode::NameAsc => SortMode::NameDesc,
             SortMode::NameDesc => SortMode::RevisionDesc,
-            SortMode::RevisionDesc => SortMode::NameAsc,
+            SortMode::RevisionDesc => SortMode::Relevance,
         };
         self.list_state.select(Some(0));
     }
 
     pub fn display_snaps(&self) -> Vec<DisplaySnap> {
+        let query = self.search_query.trim().to_lowercase();
+
         let mut snaps: Vec<DisplaySnap> = if self.showing_results {
             let installed_names: std::collections::HashSet<&str> =
                 self.installed.iter().map(|s| s.name.as_str()).collect();
@@ -270,27 +351,57 @@ impl App {
             self.installed.iter().map(DisplaySnap::from).collect()
         };
 
-        snaps.sort_by(|a, b| match self.sort_mode {
-            SortMode::NameAsc => a
-                .name
-                .to_lowercase()
-                .cmp(&b.name.to_lowercase())
-                .then_with(|| a.name.cmp(&b.name)),
-            SortMode::NameDesc => b
-                .name
-                .to_lowercase()
-                .cmp(&a.name.to_lowercase())
-                .then_with(|| b.name.cmp(&a.name)),
-            SortMode::RevisionDesc => b
-                .version
-                .as_deref()
-                .unwrap_or_default()
-                .cmp(a.version.as_deref().unwrap_or_default())
-                .then_with(|| a.name.cmp(&b.name)),
-        });
+        // When searching, default to Relevance unless user has explicitly changed sort.
+        let effective_sort = &self.sort_mode;
 
-        if self.showing_results {
-            snaps.sort_by_key(|snap| if snap.installed { 0u8 } else { 1u8 });
+        match effective_sort {
+            SortMode::Relevance => {
+                snaps.sort_by(|a, b| {
+                    let qa =
+                        match_quality(&a.name, a.title.as_deref(), a.summary.as_deref(), &query);
+                    let qb =
+                        match_quality(&b.name, b.title.as_deref(), b.summary.as_deref(), &query);
+                    // Lower quality score = better match. Installed always beats uninstalled.
+                    let installed_ord = b.installed.cmp(&a.installed);
+                    installed_ord
+                        .then_with(|| qa.cmp(&qb))
+                        .then_with(|| a.name.cmp(&b.name))
+                });
+            }
+            SortMode::NameAsc => {
+                snaps.sort_by(|a, b| {
+                    a.name
+                        .to_lowercase()
+                        .cmp(&b.name.to_lowercase())
+                        .then_with(|| a.name.cmp(&b.name))
+                });
+                if self.showing_results {
+                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
+                }
+            }
+            SortMode::NameDesc => {
+                snaps.sort_by(|a, b| {
+                    b.name
+                        .to_lowercase()
+                        .cmp(&a.name.to_lowercase())
+                        .then_with(|| b.name.cmp(&a.name))
+                });
+                if self.showing_results {
+                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
+                }
+            }
+            SortMode::RevisionDesc => {
+                snaps.sort_by(|a, b| {
+                    b.install_date
+                        .as_deref()
+                        .unwrap_or_default()
+                        .cmp(a.install_date.as_deref().unwrap_or_default())
+                        .then_with(|| a.name.cmp(&b.name))
+                });
+                if self.showing_results {
+                    snaps.sort_by_key(|s| if s.installed { 0u8 } else { 1u8 });
+                }
+            }
         }
 
         snaps
@@ -426,14 +537,32 @@ impl App {
 
     pub fn toggle_connections_mode(&mut self) {
         self.connections_mode = !self.connections_mode;
-        if self.connections_mode && self.connections_state.selected().is_none() {
+        if self.connections_mode {
+            // Entering connections pane: show ghost arrow on manage, highlight connections
+            self.manage_state
+                .select(Some(self.manage_state.selected().unwrap_or(0)));
+            if self.connections_state.selected().is_none() && !self.connection_items().is_empty() {
+                self.connections_state.select(Some(0));
+            }
+            self.connections_activated = true;
+        } else {
+            // Returning to manage actions: show ghost arrow on connections, highlight manage
             self.connections_state
-                .select((!self.connection_items().is_empty()).then_some(0));
+                .select(Some(self.connections_state.selected().unwrap_or(0)));
+            if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
+                self.manage_state.select(Some(0));
+            }
+            self.manage_activated = true;
         }
     }
 
     pub fn close_connections_mode(&mut self) {
         self.connections_mode = false;
+        // Keep connections position as ghost, restore manage highlight
+        if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
+            self.manage_state.select(Some(0));
+        }
+        self.manage_activated = true;
     }
 
     pub fn selected_connection(&self) -> Option<ConnectionItem> {
@@ -543,14 +672,16 @@ impl App {
         }
         self.managed_snap_name = Some(snap.name);
         self.manage_actions = actions;
-        let mut state = ListState::default();
-        state.select(Some(0));
-        self.manage_state = state;
+        let mut ms = ListState::default();
+        ms.select(Some(0));
+        self.manage_state = ms;
+        self.manage_activated = true;
         self.snap_interfaces.clear();
         self.snap_connections.clear();
         self.interfaces_loading = false;
         self.connections_mode = false;
         self.connections_state = ListState::default();
+        self.connections_activated = false;
         self.mode = AppMode::Manage;
         self.error = None;
         self.status_message = None;
@@ -579,8 +710,14 @@ impl App {
         if let Ok(connections) = conn_result {
             self.snap_connections = connections;
         }
-        self.connections_state
-            .select((!self.connection_items_for_snap(snap_name).is_empty()).then_some(0));
+        // Pre-select index 0 so the ghost arrow shows immediately (connections_activated
+        // prevents this from counting as a "second click").
+        if !self.connection_items().is_empty() {
+            self.connections_state.select(Some(0));
+            self.connections_activated = true;
+        } else {
+            self.connections_state.select(None);
+        }
         self.interfaces_loading = false;
     }
 
@@ -593,6 +730,8 @@ impl App {
         self.channel_input.clear();
         self.pending_channel_action = None;
         self.classic_pending = None;
+        self.confirm_pending = None;
+        self.confirm_message = None;
         self.managed_snap_name = None;
         self.snap_interfaces.clear();
         self.snap_connections.clear();
@@ -602,6 +741,85 @@ impl App {
         self.slot_picker_plug = None;
         self.slot_picker_items.clear();
         self.slot_picker_state = ListState::default();
+    }
+
+    /// Returns true if `action` is destructive and should require confirmation.
+    pub fn action_needs_confirm(action: &ManageAction) -> bool {
+        matches!(
+            action,
+            ManageAction::Uninstall | ManageAction::Revert | ManageAction::Disable
+        )
+    }
+
+    /// Show a confirmation dialog before executing the given action.
+    pub fn request_confirm_action(&mut self, action: ManageAction) {
+        let snap_name = self
+            .selected_snap()
+            .map(|s| s.title.unwrap_or(s.name))
+            .unwrap_or_default();
+        self.confirm_message = Some(match &action {
+            ManageAction::Uninstall => format!("Uninstall {snap_name}?"),
+            ManageAction::Revert => format!("Revert {snap_name} to the previous version?"),
+            ManageAction::Disable => format!("Disable {snap_name}?"),
+            _ => format!("Run \"{}\" on {snap_name}?", action.label()),
+        });
+        self.confirm_pending = Some(ConfirmPending::Action(action));
+        self.confirm_hovered = Some(false); // default to No
+        self.mode = AppMode::Confirm;
+    }
+
+    /// Show a confirmation dialog before toggling a connection.
+    pub fn request_confirm_connection(&mut self) {
+        let Some(item) = self.selected_connection() else {
+            return;
+        };
+        let (pending, msg) = if item.connected {
+            (
+                ConfirmPending::Disconnect,
+                format!(
+                    "Disconnect {}:{} from {}:{}?",
+                    item.plug_snap, item.plug_name, item.slot_snap, item.slot_name
+                ),
+            )
+        } else {
+            (
+                ConfirmPending::Connect,
+                format!(
+                    "Connect {}:{} to {}:{}?",
+                    item.plug_snap, item.plug_name, item.slot_snap, item.slot_name
+                ),
+            )
+        };
+        self.confirm_message = Some(msg);
+        self.confirm_pending = Some(pending);
+        self.confirm_hovered = Some(false); // default to No
+        self.mode = AppMode::Confirm;
+    }
+
+    pub fn cancel_confirm(&mut self) {
+        self.confirm_pending = None;
+        self.confirm_message = None;
+        self.confirm_hovered = None;
+        self.mode = AppMode::Manage;
+    }
+
+    pub async fn execute_confirm(&mut self) {
+        let Some(pending) = self.confirm_pending.take() else {
+            return;
+        };
+        self.confirm_message = None;
+        self.mode = AppMode::Manage;
+        match pending {
+            ConfirmPending::Action(action) => {
+                let name = match self.selected_snap().map(|s| s.name.clone()) {
+                    Some(n) => n,
+                    None => return,
+                };
+                self.execute_action(name, action, None).await;
+            }
+            ConfirmPending::Connect => self.connect_selected().await,
+            ConfirmPending::Disconnect => self.disconnect_selected().await,
+        }
     }
 
     /// Dismiss the classic confirmation and go back to the manage panel.
@@ -663,9 +881,7 @@ impl App {
                 channels.sort_by_key(|a| channel_sort_key(&a.0));
                 channels.push((String::new(), empty_channel_info()));
                 self.available_channels = channels;
-                let mut state = ListState::default();
-                state.select(Some(0));
-                self.channel_picker_state = state;
+                self.channel_picker_state = ListState::default();
                 self.mode = AppMode::ChannelPicker;
             }
             Err(e) => {
@@ -711,6 +927,10 @@ impl App {
             self.open_channel_picker(action).await;
             return;
         }
+        if Self::action_needs_confirm(&action) {
+            self.request_confirm_action(action);
+            return;
+        }
         let name = match self.selected_snap().map(|s| s.name.clone()) {
             Some(n) => n,
             None => return,
@@ -719,14 +939,10 @@ impl App {
     }
 
     pub async fn activate_selected_connection(&mut self) {
-        let Some(item) = self.selected_connection() else {
+        if self.selected_connection().is_none() {
             return;
         };
-        if item.connected {
-            self.disconnect_selected().await;
-        } else {
-            self.connect_selected().await;
-        }
+        self.request_confirm_connection();
     }
 
     pub async fn connect_selected(&mut self) {
@@ -1110,6 +1326,16 @@ impl App {
             self.poll_sidebar_changes().await;
         }
 
+        // Poll the Changes view every 3 s while it is open.
+        if self.mode == AppMode::Changes {
+            let due = self
+                .changes_last_polled
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(3));
+            if due {
+                self.poll_changes().await;
+            }
+        }
+
         if let Some(icon_url) = self.selected_snap().and_then(|snap| snap.icon_url) {
             self.fetch_icon_if_needed(icon_url).await;
         }
@@ -1125,7 +1351,8 @@ impl App {
         self.loading = true;
         self.error = None;
         match self.client.list_all_changes().await {
-            Ok(changes) => {
+            Ok(mut changes) => {
+                sort_changes(&mut changes);
                 self.changes_list = changes;
                 self.changes_focus_detail = false;
                 self.changes_list_state
@@ -1139,7 +1366,29 @@ impl App {
                 self.error = Some(e.to_string());
             }
         }
+        self.changes_last_polled = Some(Instant::now());
         self.loading = false;
+    }
+
+    /// Refresh the changes list while preserving the current selection.
+    pub async fn poll_changes(&mut self) {
+        if let Ok(mut changes) = self.client.list_all_changes().await {
+            let selected_id = self
+                .changes_list_state
+                .selected()
+                .and_then(|i| self.changes_list.get(i))
+                .map(|c| c.id.clone());
+            sort_changes(&mut changes);
+            self.changes_list = changes;
+            // Restore selection by id, fall back to same index, else first item.
+            let new_idx = selected_id
+                .and_then(|id| self.changes_list.iter().position(|c| c.id == id))
+                .or(self.changes_list_state.selected())
+                .map(|i| i.min(self.changes_list.len().saturating_sub(1)))
+                .filter(|_| !self.changes_list.is_empty());
+            self.changes_list_state.select(new_idx);
+        }
+        self.changes_last_polled = Some(Instant::now());
     }
 
     pub async fn abort_selected_change(&mut self) {
@@ -1265,6 +1514,7 @@ impl App {
 
         self.store_results = results;
         self.showing_results = true;
+        self.sort_mode = SortMode::Relevance;
         self.list_state.select(Some(0));
         self.loading = false;
     }
@@ -1377,6 +1627,65 @@ fn channel_sort_key(channel: &str) -> (u8, String, u8, String) {
     (track_rank, track.to_string(), risk_rank, branch)
 }
 
+/// Score a snap against a search query. Lower = better match.
+/// Tiers:
+///   0 — exact name match
+///   1 — name starts with query
+///   2 — name contains query
+///   3 — title starts with query
+///   4 — title contains query
+///   5 — summary contains query
+///   6 — no match / anything else
+fn match_quality(name: &str, title: Option<&str>, summary: Option<&str>, query: &str) -> u8 {
+    if query.is_empty() {
+        return 6;
+    }
+    let name_lc = name.to_lowercase();
+    let q = query; // already lowercased by caller
+    if name_lc == q {
+        return 0;
+    }
+    if name_lc.starts_with(q) {
+        return 1;
+    }
+    if name_lc.contains(q) {
+        return 2;
+    }
+    if let Some(t) = title {
+        let t_lc = t.to_lowercase();
+        if t_lc.starts_with(q) {
+            return 3;
+        }
+        if t_lc.contains(q) {
+            return 4;
+        }
+    }
+    if let Some(s) = summary
+        && s.to_lowercase().contains(q)
+    {
+        return 5;
+    }
+    6
+}
+
 fn open_url(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Sort changes most-recent-first, with in-progress (not ready) changes floated to the top.
+/// Falls back to lexicographic comparison of spawn_time strings, which works correctly for
+/// ISO 8601 / RFC 3339 timestamps.
+fn sort_changes(changes: &mut [Change]) {
+    changes.sort_by(|a, b| {
+        // In-progress before finished
+        let a_active = !a.ready;
+        let b_active = !b.ready;
+        b_active.cmp(&a_active).then_with(|| {
+            // Most recent first
+            b.spawn_time
+                .as_deref()
+                .unwrap_or("")
+                .cmp(a.spawn_time.as_deref().unwrap_or(""))
+        })
+    });
 }

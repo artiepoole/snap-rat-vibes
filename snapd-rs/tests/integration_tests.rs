@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(get_path, "/v2/snaps/test-snap/conf");
 
         // Get specific keys
-        let keys = vec!["key1", "key2"];
+        let keys = ["key1", "key2"];
         let keys_path = format!("/v2/snaps/{}/conf?keys={}", snap_name, keys.join(","));
         assert_eq!(keys_path, "/v2/snaps/test-snap/conf?keys=key1,key2");
     }

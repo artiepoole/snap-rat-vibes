@@ -4,6 +4,7 @@ sdks:
   # for rust bindings
   - name: rust
     channel: latest/stable
+  - name: try-build-essential
   # various options for LLM harnesses
   - name: opencode
     channel: latest/stable
