@@ -108,7 +108,8 @@ impl App {
                     Ok(change_id) => {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
-                        self.status_message = Some("Connecting…".to_string());
+                        self.status_message =
+                            Some(format!("Connecting{}", crate::symbols::ellipsis()));
                     }
                     Err(e) => {
                         self.error = Some(e.to_string());
@@ -142,12 +143,13 @@ impl App {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
                         self.status_message = Some(format!(
-                            "{} service '{service_name}'…",
+                            "{} service '{service_name}'{}",
                             action
                                 .label()
                                 .split_once("  ")
                                 .map(|(l, _)| l)
-                                .unwrap_or(action.label())
+                                .unwrap_or(action.label().as_str()),
+                            crate::symbols::ellipsis()
                         ));
                     }
                     Err(ref e) if crate::resume::is_elevation_needed(e) => {
@@ -182,9 +184,15 @@ impl App {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
                         self.status_message = Some(if install {
-                            format!("Installing component '{component_name}'…")
+                            format!(
+                                "Installing component '{component_name}'{}",
+                                crate::symbols::ellipsis()
+                            )
                         } else {
-                            format!("Removing component '{component_name}'…")
+                            format!(
+                                "Removing component '{component_name}'{}",
+                                crate::symbols::ellipsis()
+                            )
                         });
                     }
                     Err(ref e) if crate::resume::is_elevation_needed(e) => {
@@ -216,7 +224,10 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    self.status_message = Some("Sideloading (classic)…".to_string());
+                    self.status_message = Some(format!(
+                        "Sideloading (classic){}",
+                        crate::symbols::ellipsis()
+                    ));
                     self.active_change_action = Some(ManageAction::InstallLocalFile);
                     self.active_change_snap = Some(path);
                 }
@@ -243,7 +254,10 @@ impl App {
             Ok(change_id) => {
                 self.active_change_id = Some(change_id.0);
                 self.active_change = None;
-                self.status_message = Some("Installing (classic)…".to_string());
+                self.status_message = Some(format!(
+                    "Installing (classic){}",
+                    crate::symbols::ellipsis()
+                ));
                 self.active_change_action = Some(ManageAction::InstallFromChannel);
                 self.active_change_snap = Some(name.clone());
             }

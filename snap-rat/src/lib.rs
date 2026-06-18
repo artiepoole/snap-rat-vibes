@@ -23,11 +23,14 @@ mod mouse;
 pub mod resume;
 mod services;
 mod slots;
+pub mod symbols;
 mod types;
 use app::{App, AppMode};
 
 pub async fn run() -> anyhow::Result<()> {
     let resume_state = resume::parse_resume_arg();
+    let no_unicode = std::env::args().any(|a| a == "--no-unicode");
+    symbols::init(if no_unicode { false } else { symbols::detect() });
     let terminal = ratatui::init();
     crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
     let result = run_loop(terminal, resume_state).await;

@@ -8,9 +8,12 @@ use crate::app::ConnectionItem;
 
 pub(crate) fn connection_list_item(item: &ConnectionItem) -> ListItem<'static> {
     let marker = if item.connected {
-        Span::styled("● ", Style::default().fg(Color::Green))
+        Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green))
     } else {
-        Span::styled("○ ", Style::default().fg(Color::DarkGray))
+        Span::styled(
+            crate::symbols::dot_off(),
+            Style::default().fg(Color::DarkGray),
+        )
     };
     let name = if item.is_plug {
         item.plug_name.clone()
@@ -27,7 +30,7 @@ pub(crate) fn connection_list_item(item: &ConnectionItem) -> ListItem<'static> {
     ];
     if name != item.interface_name {
         spans.push(Span::styled(
-            format!(" · {name}"),
+            format!(" - {name}"),
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -38,7 +41,7 @@ pub(crate) fn connection_list_item(item: &ConnectionItem) -> ListItem<'static> {
             format!("{}:{}", item.plug_snap, item.plug_name)
         };
         spans.push(Span::styled(
-            format!("  → {peer}"),
+            format!("  {} {peer}", crate::symbols::arrow()),
             Style::default().fg(Color::DarkGray),
         ));
     } else {

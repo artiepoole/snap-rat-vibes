@@ -52,13 +52,13 @@ pub enum ServiceAction {
 }
 
 impl ServiceAction {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            ServiceAction::Start => "Start",
-            ServiceAction::Stop => "Stop",
-            ServiceAction::Enable => "Enable  (start on boot)",
-            ServiceAction::Disable => "Disable  (stop, no auto-start)",
-            ServiceAction::Restart => "Restart",
+            ServiceAction::Start => "Start".to_string(),
+            ServiceAction::Stop => "Stop".to_string(),
+            ServiceAction::Enable => "Enable  (start on boot)".to_string(),
+            ServiceAction::Disable => "Disable  (stop, no auto-start)".to_string(),
+            ServiceAction::Restart => "Restart".to_string(),
         }
     }
 }
@@ -99,12 +99,12 @@ pub enum SortMode {
 }
 
 impl SortMode {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            SortMode::Relevance => "Relevance",
-            SortMode::NameAsc => "A→Z",
-            SortMode::NameDesc => "Z→A",
-            SortMode::RevisionDesc => "Recently installed",
+            SortMode::Relevance => "Relevance".to_string(),
+            SortMode::NameAsc => format!("A{}Z", crate::symbols::arrow()),
+            SortMode::NameDesc => format!("Z{}A", crate::symbols::arrow()),
+            SortMode::RevisionDesc => "Recently installed".to_string(),
         }
     }
 }
@@ -129,23 +129,27 @@ pub enum ManageAction {
 }
 
 impl ManageAction {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            ManageAction::Install => "Install",
-            ManageAction::InstallFromChannel => "Install from channel →",
-            ManageAction::InstallLocalFile => "Install from local file",
-            ManageAction::Refresh => "Refresh to latest",
-            ManageAction::SwitchChannel => "Switch channel →",
-            ManageAction::Revert => "Revert to previous version",
-            ManageAction::Enable => "Enable",
-            ManageAction::Disable => "Disable",
-            ManageAction::Uninstall => "Uninstall",
-            ManageAction::UninstallPurge => "Uninstall and purge data",
-            ManageAction::OpenConnections => "Connections →",
-            ManageAction::OpenComponents => "Components →",
-            ManageAction::OpenServices => "Services →",
-            ManageAction::OpenStorePage => "Open store page",
-            ManageAction::OpenContactPage => "Open contact page",
+            ManageAction::Install => "Install".to_string(),
+            ManageAction::InstallFromChannel => {
+                format!("Install from channel {}", crate::symbols::arrow())
+            }
+            ManageAction::InstallLocalFile => "Install from local file".to_string(),
+            ManageAction::Refresh => "Refresh to latest".to_string(),
+            ManageAction::SwitchChannel => {
+                format!("Switch channel {}", crate::symbols::arrow())
+            }
+            ManageAction::Revert => "Revert to previous version".to_string(),
+            ManageAction::Enable => "Enable".to_string(),
+            ManageAction::Disable => "Disable".to_string(),
+            ManageAction::Uninstall => "Uninstall".to_string(),
+            ManageAction::UninstallPurge => "Uninstall and purge data".to_string(),
+            ManageAction::OpenConnections => format!("Connections {}", crate::symbols::arrow()),
+            ManageAction::OpenComponents => format!("Components {}", crate::symbols::arrow()),
+            ManageAction::OpenServices => format!("Services {}", crate::symbols::arrow()),
+            ManageAction::OpenStorePage => "Open store page".to_string(),
+            ManageAction::OpenContactPage => "Open contact page".to_string(),
         }
     }
 
@@ -476,7 +480,10 @@ impl App {
                     Ok(change_id) => {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
-                        self.status_message = Some("Installing (classic)…".to_string());
+                        self.status_message = Some(format!(
+                            "Installing (classic){}",
+                            crate::symbols::ellipsis()
+                        ));
                         self.active_change_action = Some(ManageAction::InstallFromChannel);
                         self.active_change_snap = Some(snap_name);
                     }
@@ -634,12 +641,12 @@ impl App {
         self.active_change_action = Some(action.clone());
         self.active_change_snap = Some(name.clone());
 
-        let result: Result<&str, snapd_rs::Error> = match &action {
+        let result: Result<String, snapd_rs::Error> = match &action {
             ManageAction::Install => match self.client.install_snap(&name, None).await {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Installing…")
+                    Ok(format!("Installing{}", crate::symbols::ellipsis()))
                 }
                 Err(e) if e.is_kind("snap-needs-classic") => {
                     self.loading = false;
@@ -655,7 +662,7 @@ impl App {
                     Ok(change_id) => {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
-                        Ok("Installing…")
+                        Ok(format!("Installing{}", crate::symbols::ellipsis()))
                     }
                     Err(e) if e.is_kind("snap-needs-classic") => {
                         self.loading = false;
@@ -671,7 +678,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Refreshing…")
+                    Ok(format!("Refreshing{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -679,7 +686,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Switching channel…")
+                    Ok(format!("Switching channel{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -687,7 +694,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Reverting…")
+                    Ok(format!("Reverting{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -695,7 +702,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Enabling…")
+                    Ok(format!("Enabling{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -703,7 +710,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Disabling…")
+                    Ok(format!("Disabling{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -711,7 +718,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Uninstalling…")
+                    Ok(format!("Uninstalling{}", crate::symbols::ellipsis()))
                 }
                 Err(e) => Err(e),
             },
@@ -719,7 +726,10 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Uninstalling (purge)…")
+                    Ok(format!(
+                        "Uninstalling (purge){}",
+                        crate::symbols::ellipsis()
+                    ))
                 }
                 Err(e) => Err(e),
             },
@@ -727,7 +737,7 @@ impl App {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);
                     self.active_change = None;
-                    Ok("Sideloading…")
+                    Ok(format!("Sideloading{}", crate::symbols::ellipsis()))
                 }
                 Err(e) if e.is_kind("snap-needs-classic") => {
                     self.loading = false;
@@ -740,7 +750,7 @@ impl App {
             },
             ManageAction::OpenStorePage => {
                 open_url(&format!("https://snapcraft.io/{name}"));
-                Ok("Opened store page")
+                Ok("Opened store page".to_string())
             }
             ManageAction::OpenContactPage => {
                 if let Some(contact) = self
@@ -751,19 +761,19 @@ impl App {
                 {
                     open_url(contact);
                 }
-                Ok("Opened contact page")
+                Ok("Opened contact page".to_string())
             }
             // These are handled by execute_selected_action before reaching here.
             ManageAction::OpenConnections
             | ManageAction::OpenComponents
-            | ManageAction::OpenServices => Ok(""),
+            | ManageAction::OpenServices => Ok(String::new()),
         };
 
         self.loading = false;
 
         match result {
             Ok(msg) => {
-                self.status_message = Some(msg.to_string());
+                self.status_message = Some(msg);
             }
             Err(ref e) if crate::resume::is_elevation_needed(e) => {
                 use crate::resume::ResumeAction;

@@ -34,9 +34,11 @@ pub fn truncate_text(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
-    let visible = max_chars.saturating_sub(1).max(1);
+    let visible = max_chars
+        .saturating_sub(crate::symbols::ellipsis().chars().count())
+        .max(1);
     let mut truncated = text.chars().take(visible).collect::<String>();
-    truncated.push('…');
+    truncated.push_str(crate::symbols::ellipsis());
     truncated
 }
 
@@ -74,7 +76,16 @@ pub fn progress_bar(done: i64, total: i64, width: usize) -> String {
         0
     }
     .min(width);
-    format!("[{}{}]", "█".repeat(filled), "░".repeat(width - filled))
+    let (filled_char, empty_char) = if crate::symbols::is_unicode() {
+        ("█", "░")
+    } else {
+        ("#", "-")
+    };
+    format!(
+        "[{}{}]",
+        filled_char.repeat(filled),
+        empty_char.repeat(width - filled)
+    )
 }
 
 pub fn change_status_label(status: &ChangeStatus) -> &'static str {

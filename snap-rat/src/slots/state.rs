@@ -63,7 +63,7 @@ impl App {
             Ok(change_id) => {
                 self.active_change_id = Some(change_id.0);
                 self.active_change = None;
-                self.status_message = Some("Connecting…".to_string());
+                self.status_message = Some(format!("Connecting{}", crate::symbols::ellipsis()));
             }
             Err(ref e) if crate::resume::is_elevation_needed(e) => {
                 self.try_elevate_and_exec(&plug.plug_snap, None);

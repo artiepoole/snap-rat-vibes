@@ -37,14 +37,28 @@ pub(crate) fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(if !is_changes { "▶ " } else { "▷ " }, snaps_style),
+            Span::styled(
+                if !is_changes {
+                    crate::symbols::play()
+                } else {
+                    crate::symbols::play_hollow()
+                },
+                snaps_style,
+            ),
             Span::styled("[s]naps", snaps_style),
         ])),
         tab_layout[0],
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(if is_changes { "▶ " } else { "▷ " }, changes_style),
+            Span::styled(
+                if is_changes {
+                    crate::symbols::play()
+                } else {
+                    crate::symbols::play_hollow()
+                },
+                changes_style,
+            ),
             Span::styled("[c]hanges", changes_style),
         ])),
         tab_layout[1],
@@ -67,9 +81,17 @@ pub(crate) fn render_search(frame: &mut Frame, app: &mut App, area: Rect) {
         .padding(Padding::horizontal(1));
 
     let query_display = if app.search_focused {
-        format!("{}█", app.search_query)
+        format!(
+            "{}{}",
+            app.search_query,
+            if crate::symbols::is_unicode() {
+                "█"
+            } else {
+                "_"
+            }
+        )
     } else if app.search_query.is_empty() {
-        "Press / to search the store…".to_string()
+        format!("Press / to search the store{}", crate::symbols::ellipsis())
     } else {
         app.search_query.clone()
     };
@@ -132,16 +154,23 @@ pub(crate) fn render_list(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             Style::default()
         })
-        .highlight_symbol(if list_active { "▶ " } else { "▷ " });
+        .highlight_symbol(if list_active {
+            crate::symbols::play()
+        } else {
+            crate::symbols::play_hollow()
+        });
 
     frame.render_stateful_widget(list, area, &mut app.list_state);
 }
 
 fn snap_list_item(snap: &DisplaySnap) -> ListItem<'static> {
     let installed_marker = if snap.installed {
-        Span::styled("● ", Style::default().fg(Color::Green))
+        Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green))
     } else {
-        Span::styled("○ ", Style::default().fg(Color::DarkGray))
+        Span::styled(
+            crate::symbols::dot_off(),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
     let name_style = if snap.is_local_file {

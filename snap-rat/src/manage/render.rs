@@ -178,7 +178,7 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
                     .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol("▶ ");
+            .highlight_symbol(crate::symbols::play());
         frame.render_stateful_widget(action_list, layout[1], &mut app.manage_state);
         app.manage_actions_area = Some(layout[1]);
     }
@@ -219,7 +219,8 @@ fn render_connections_content(
         );
     } else if app.interfaces_loading {
         frame.render_widget(
-            Paragraph::new("Loading…").style(Style::default().fg(Color::DarkGray).italic()),
+            Paragraph::new(format!("Loading{}", crate::symbols::ellipsis()))
+                .style(Style::default().fg(Color::DarkGray).italic()),
             area,
         );
     } else if connection_items.is_empty() {
@@ -242,16 +243,19 @@ fn render_connections_content(
                 Style::default()
             })
             .highlight_symbol(if app.right_pane_focused {
-                "▶ "
+                crate::symbols::play()
             } else {
-                "▷ "
+                crate::symbols::play_hollow()
             });
         frame.render_stateful_widget(list, chunks[0], &mut app.connections_state);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green)),
                 Span::styled("connected  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    crate::symbols::dot_off(),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled("disconnected", Style::default().fg(Color::DarkGray)),
             ])),
             chunks[1],
@@ -273,7 +277,8 @@ fn render_components_content(
         );
     } else if app.components_loading {
         frame.render_widget(
-            Paragraph::new("Loading…").style(Style::default().fg(Color::DarkGray).italic()),
+            Paragraph::new(format!("Loading{}", crate::symbols::ellipsis()))
+                .style(Style::default().fg(Color::DarkGray).italic()),
             area,
         );
     } else if app.snap_components.is_empty() {
@@ -297,16 +302,19 @@ fn render_components_content(
                 Style::default()
             })
             .highlight_symbol(if app.right_pane_focused {
-                "▶ "
+                crate::symbols::play()
             } else {
-                "▷ "
+                crate::symbols::play_hollow()
             });
         frame.render_stateful_widget(list, chunks[0], &mut app.components_state);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green)),
                 Span::styled("installed  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    crate::symbols::dot_off(),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled("not installed", Style::default().fg(Color::DarkGray)),
             ])),
             chunks[1],
@@ -328,7 +336,8 @@ fn render_services_content(
         );
     } else if app.services_loading {
         frame.render_widget(
-            Paragraph::new("Loading…").style(Style::default().fg(Color::DarkGray).italic()),
+            Paragraph::new(format!("Loading{}", crate::symbols::ellipsis()))
+                .style(Style::default().fg(Color::DarkGray).italic()),
             area,
         );
     } else if app.snap_services.is_empty() {
@@ -355,21 +364,24 @@ fn render_services_content(
                 Style::default()
             })
             .highlight_symbol(if app.right_pane_focused {
-                "▶ "
+                crate::symbols::play()
             } else {
-                "▷ "
+                crate::symbols::play_hollow()
             });
         frame.render_stateful_widget(list, chunks[0], &mut app.services_state);
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green)),
                 Span::styled("running  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("● ", Style::default().fg(Color::Yellow)),
+                Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Yellow)),
                 Span::styled("no-boot  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("✗ ", Style::default().fg(Color::Red)),
+                Span::styled(crate::symbols::dot_err(), Style::default().fg(Color::Red)),
                 Span::styled("failed  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    crate::symbols::dot_off(),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled("disabled", Style::default().fg(Color::DarkGray)),
             ])),
             chunks[1],
@@ -397,7 +409,14 @@ fn render_service_action_menu(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
-                Span::styled("⚙ ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    if crate::symbols::is_unicode() {
+                        "⚙ "
+                    } else {
+                        "* "
+                    },
+                    Style::default().fg(Color::Cyan),
+                ),
                 Span::styled(service_name, Style::default().fg(Color::Cyan).bold()),
             ]),
             Line::from(Span::styled(
@@ -413,11 +432,32 @@ fn render_service_action_menu(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|a| {
             let (symbol, color) = match a {
-                ServiceAction::Start => ("▶ ", Color::Green),
-                ServiceAction::Enable => ("▶ ", Color::Green),
-                ServiceAction::Stop => ("■ ", Color::Red),
-                ServiceAction::Disable => ("■ ", Color::Red),
-                ServiceAction::Restart => ("↺ ", Color::Cyan),
+                ServiceAction::Start => (crate::symbols::play(), Color::Green),
+                ServiceAction::Enable => (crate::symbols::play(), Color::Green),
+                ServiceAction::Stop => (
+                    if crate::symbols::is_unicode() {
+                        "■ "
+                    } else {
+                        "[] "
+                    },
+                    Color::Red,
+                ),
+                ServiceAction::Disable => (
+                    if crate::symbols::is_unicode() {
+                        "■ "
+                    } else {
+                        "[] "
+                    },
+                    Color::Red,
+                ),
+                ServiceAction::Restart => (
+                    if crate::symbols::is_unicode() {
+                        "↺ "
+                    } else {
+                        "R "
+                    },
+                    Color::Cyan,
+                ),
             };
             ListItem::new(Line::from(vec![
                 Span::styled(symbol, Style::default().fg(color)),
@@ -432,7 +472,7 @@ fn render_service_action_menu(frame: &mut Frame, app: &mut App, area: Rect) {
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol("▶ ");
+        .highlight_symbol(crate::symbols::play());
     frame.render_stateful_widget(action_list, chunks[1], &mut app.service_actions_state);
 }
 

@@ -44,7 +44,10 @@ pub(crate) fn render_slot_picker(frame: &mut Frame, app: &mut App) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(format!(" Connect '{interface_name}' to… "))
+                .title(format!(
+                    " Connect '{interface_name}' to{} ",
+                    crate::symbols::ellipsis()
+                ))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Cyan))
@@ -55,7 +58,7 @@ pub(crate) fn render_slot_picker(frame: &mut Frame, app: &mut App) {
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol("▶ ");
+        .highlight_symbol(crate::symbols::play());
 
     frame.render_stateful_widget(list, popup, &mut app.slot_picker_state);
 }

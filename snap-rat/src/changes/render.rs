@@ -43,7 +43,7 @@ pub(crate) fn render_changes_screen(
                     change.kind.clone(),
                     Style::default().fg(Color::White).bold(),
                 ),
-                Span::raw(" — "),
+                Span::raw(" - "),
                 Span::raw(change.summary.clone()),
                 Span::styled(
                     format!(" ({})", change.spawn_time.as_deref().unwrap_or("unknown")),
@@ -60,7 +60,7 @@ pub(crate) fn render_changes_screen(
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol("▶ ");
+        .highlight_symbol(crate::symbols::play());
     frame.render_stateful_widget(list, list_area, &mut app.changes_list_state);
 
     let detail_block = Block::default()
@@ -166,7 +166,7 @@ pub(crate) fn render_changes_screen(
     let tasks = List::new(task_items)
         .block(Block::default().title(" Tasks ").borders(Borders::ALL))
         .highlight_style(Style::default().bg(Color::DarkGray))
-        .highlight_symbol("▶ ");
+        .highlight_symbol(crate::symbols::play());
     frame.render_stateful_widget(tasks, detail_layout[1], &mut app.changes_detail_state);
 
     if let Some(err) = &change.err {
@@ -190,9 +190,9 @@ pub(crate) fn render_changes_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if changes.is_empty() {
-        " Changes "
+        " Changes ".to_string()
     } else {
-        " ● Active Changes "
+        format!(" {} Active Changes ", crate::symbols::dot())
     };
     let block = Block::default()
         .title(title)
@@ -222,7 +222,7 @@ pub(crate) fn render_changes_sidebar(frame: &mut Frame, app: &App, area: Rect) {
             .map(|active| active.id == change.id)
             .unwrap_or(false)
         {
-            "● "
+            crate::symbols::dot_on()
         } else {
             ""
         };
