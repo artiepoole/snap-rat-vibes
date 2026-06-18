@@ -157,46 +157,6 @@ impl App {
         }
     }
 
-    pub fn toggle_right_pane_focus(&mut self) {
-        self.right_pane_focused = !self.right_pane_focused;
-        if self.right_pane_focused {
-            // Entering right pane: ensure something is selected
-            self.manage_state
-                .select(Some(self.manage_state.selected().unwrap_or(0)));
-            match self.active_right_pane {
-                RightPane::None => {}
-                RightPane::Connections => {
-                    if self.connections_state.selected().is_none()
-                        && !self.connection_items().is_empty()
-                    {
-                        self.connections_state.select(Some(0));
-                    }
-                    self.connections_activated = true;
-                }
-                RightPane::Components => {
-                    if self.components_state.selected().is_none()
-                        && !self.snap_components.is_empty()
-                    {
-                        self.components_state.select(Some(0));
-                    }
-                    self.components_activated = true;
-                }
-                RightPane::Services => {
-                    if self.services_state.selected().is_none() && !self.snap_services.is_empty() {
-                        self.services_state.select(Some(0));
-                    }
-                    self.services_activated = true;
-                }
-            }
-        } else {
-            // Returning to manage actions: restore manage highlight
-            if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
-                self.manage_state.select(Some(0));
-            }
-            self.manage_activated = true;
-        }
-    }
-
     pub fn close_right_pane_focus(&mut self) {
         self.right_pane_focused = false;
         if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {

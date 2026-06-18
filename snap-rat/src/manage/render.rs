@@ -16,21 +16,81 @@ use crate::layout::{
 use crate::services::service_list_item;
 
 pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Clear the entire area first to prevent stale terminal cells showing through
-    // when the layout changes (e.g. progress bar appearing/disappearing).
     frame.render_widget(Clear, area);
 
     let snap = match app.selected_snap() {
         Some(s) => s,
         None => return,
     };
-    let connection_items = app.connection_items();
 
     let progress_height = app
         .active_change
         .as_ref()
         .map(|change| (change.tasks.len() as u16).saturating_add(4).min(10))
         .unwrap_or(0);
+
+    // When a sub-pane is open, show it full-width (no header, no actions).
+    if app.active_right_pane != RightPane::None {
+        let mut layout_constraints = vec![Constraint::Min(0)];
+        if progress_height > 0 {
+            layout_constraints.push(Constraint::Length(progress_height));
+        }
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(layout_constraints)
+            .split(area);
+
+        let pane_title = match app.active_right_pane {
+            RightPane::None => unreachable!(),
+            RightPane::Connections => " Connections  [Esc] back ",
+            RightPane::Components => " Components  [Esc] back ",
+            RightPane::Services => " Services  [Esc] back ",
+        };
+
+        let pane_block = Block::default()
+            .title(pane_title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan))
+            .padding(Padding::horizontal(1));
+        let inner = pane_block.inner(layout[0]);
+        frame.render_widget(pane_block, layout[0]);
+
+        app.manage_actions_area = None;
+        let connection_items = app.connection_items();
+        match app.active_right_pane {
+            RightPane::None => unreachable!(),
+            RightPane::Connections => {
+                app.connections_inner_area = Some(inner);
+                app.components_inner_area = None;
+                app.services_inner_area = None;
+                render_connections_content(frame, app, inner, &snap, &connection_items);
+            }
+            RightPane::Components => {
+                app.connections_inner_area = None;
+                app.components_inner_area = Some(inner);
+                app.services_inner_area = None;
+                render_components_content(frame, app, inner, &snap);
+            }
+            RightPane::Services => {
+                app.connections_inner_area = None;
+                app.components_inner_area = None;
+                app.services_inner_area = Some(inner);
+                render_services_content(frame, app, inner, &snap);
+            }
+        }
+
+        if let Some(change) = &app.active_change {
+            render_change_progress(frame, change, layout[1]);
+        }
+        return;
+    }
+
+    // Default: full-width manage pane (header + actions list).
+    app.connections_inner_area = None;
+    app.components_inner_area = None;
+    app.services_inner_area = None;
+
     let mut constraints = vec![Constraint::Length(6), Constraint::Min(0)];
     if progress_height > 0 {
         constraints.push(Constraint::Length(progress_height));
@@ -78,21 +138,11 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_widget(Paragraph::new(header_lines).block(header_block), layout[0]);
 
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(layout[1]);
-
-    let actions_focused = !app.right_pane_focused;
     let action_block = Block::default()
         .title(" Actions ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(if actions_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        });
+        .border_style(Style::default().fg(Color::Cyan));
 
     let action_items: Vec<ListItem> = app
         .manage_actions
@@ -120,75 +170,14 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let action_list = List::new(action_items)
         .block(action_block)
-        .highlight_style(if actions_focused {
+        .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default() // ghost: arrow position visible, no background
-        })
-        .highlight_symbol(if actions_focused { "▶ " } else { "▷ " });
-    frame.render_stateful_widget(action_list, panes[0], &mut app.manage_state);
-    app.manage_actions_area = Some(panes[0]);
-
-    // Right pane: title and focus state
-    let right_pane_title = match app.active_right_pane {
-        RightPane::None => " Details ",
-        RightPane::Connections => " Connections ",
-        RightPane::Components => " Components ",
-        RightPane::Services => " Services ",
-    };
-
-    let right_pane_block = Block::default()
-        .title(right_pane_title)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(if app.right_pane_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })
-        .padding(Padding::horizontal(1));
-
-    let right_inner = right_pane_block.inner(panes[1]);
-    frame.render_widget(right_pane_block, panes[1]);
-
-    match app.active_right_pane {
-        RightPane::None => {
-            app.connections_inner_area = None;
-            app.components_inner_area = None;
-            app.services_inner_area = None;
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(
-                    "Select Connections →, Components →,\nor Services → from the actions list",
-                )
-                .style(
-                    ratatui::style::Style::default()
-                        .fg(Color::DarkGray)
-                        .italic(),
-                ),
-                right_inner,
-            );
-        }
-        RightPane::Connections => {
-            app.connections_inner_area = Some(right_inner);
-            app.components_inner_area = None;
-            app.services_inner_area = None;
-            render_connections_content(frame, app, right_inner, &snap, &connection_items);
-        }
-        RightPane::Components => {
-            app.connections_inner_area = None;
-            app.components_inner_area = Some(right_inner);
-            app.services_inner_area = None;
-            render_components_content(frame, app, right_inner, &snap);
-        }
-        RightPane::Services => {
-            app.connections_inner_area = None;
-            app.components_inner_area = None;
-            app.services_inner_area = Some(right_inner);
-            render_services_content(frame, app, right_inner, &snap);
-        }
-    }
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(action_list, layout[1], &mut app.manage_state);
+    app.manage_actions_area = Some(layout[1]);
 
     if let Some(change) = &app.active_change {
         render_change_progress(frame, change, layout[2]);

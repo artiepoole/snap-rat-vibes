@@ -110,11 +110,10 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
             _ => {}
         },
         AppMode::Manage => match key.code {
-            KeyCode::Esc | KeyCode::Char('h') if app.right_pane_focused => {
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') if app.right_pane_focused => {
                 app.close_right_pane_focus()
             }
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => app.close_manage(),
-            KeyCode::Tab => app.toggle_right_pane_focus(),
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if app.right_pane_focused => {
                 app.activate_right_pane_item().await;
             }
