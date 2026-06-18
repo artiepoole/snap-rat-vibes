@@ -47,6 +47,11 @@ impl App {
     }
 
     pub fn cancel_confirm(&mut self) {
+        let return_mode = match &self.confirm_pending {
+            Some(ConfirmPending::ServiceToggle { .. })
+            | Some(ConfirmPending::ServiceRestart { .. }) => AppMode::Manage,
+            _ => AppMode::Browse,
+        };
         self.confirm_pending = None;
         self.confirm_message = None;
         self.confirm_hovered = None;
@@ -56,7 +61,7 @@ impl App {
             self.mode = AppMode::Browse;
             self.pop_auto_connect_prompt();
         } else {
-            self.mode = AppMode::Browse;
+            self.mode = return_mode;
         }
     }
 
@@ -114,6 +119,58 @@ impl App {
                 // Show next prompt if any (after this change completes, the queue
                 // is already drained for this item).
                 self.pop_auto_connect_prompt();
+            }
+            ConfirmPending::ServiceToggle {
+                snap_name,
+                service_name,
+                is_running,
+            } => {
+                self.confirm_hovered = None;
+                self.mode = AppMode::Manage;
+                self.error = None;
+                self.status_message = None;
+                let service_id = format!("{snap_name}.{service_name}");
+                let names = [service_id.as_str()];
+                let result = if is_running {
+                    self.client.stop_service(&names).await
+                } else {
+                    self.client.start_service(&names).await
+                };
+                match result {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some(if is_running {
+                            format!("Stopping service '{service_name}'…")
+                        } else {
+                            format!("Starting service '{service_name}'…")
+                        });
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
+            }
+            ConfirmPending::ServiceRestart {
+                snap_name,
+                service_name,
+            } => {
+                self.confirm_hovered = None;
+                self.mode = AppMode::Manage;
+                self.error = None;
+                self.status_message = None;
+                let service_id = format!("{snap_name}.{service_name}");
+                let names = [service_id.as_str()];
+                match self.client.restart_service(&names).await {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some(format!("Restarting service '{service_name}'…"));
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
             }
         }
     }

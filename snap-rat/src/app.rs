@@ -54,6 +54,16 @@ pub enum ConfirmPending {
         interface_name: String,
         slot: SlotRef,
     },
+    /// Start or stop a service (is_running = current state before action).
+    ServiceToggle {
+        snap_name: String,
+        service_name: String,
+        is_running: bool,
+    },
+    ServiceRestart {
+        snap_name: String,
+        service_name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use ratatui::widgets::ListState;
 use snapd_rs::api::interfaces::SlotRef;
 
-use crate::app::{App, AppMode, ConnectionItem, RightPane};
+use crate::app::{App, AppMode, ConfirmPending, ConnectionItem, RightPane};
 
 impl App {
     pub fn connections_next(&mut self) {
@@ -191,7 +191,7 @@ impl App {
             }
             RightPane::Services => {
                 self.services_activated = false;
-                self.toggle_selected_service().await;
+                self.request_confirm_service_toggle();
             }
         }
     }
@@ -246,6 +246,47 @@ impl App {
         }
     }
 
+    pub fn request_confirm_service_toggle(&mut self) {
+        let Some(idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(idx).cloned() else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        let is_running = service.active == Some(true);
+        let action_word = if is_running { "Stop" } else { "Start" };
+        self.confirm_message = Some(format!("{action_word} service '{}'?", service.name));
+        self.confirm_pending = Some(ConfirmPending::ServiceToggle {
+            snap_name,
+            service_name: service.name.clone(),
+            is_running,
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
+    }
+
+    pub fn request_confirm_service_restart(&mut self) {
+        let Some(idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(idx).cloned() else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        self.confirm_message = Some(format!("Restart service '{}'?", service.name));
+        self.confirm_pending = Some(ConfirmPending::ServiceRestart {
+            snap_name,
+            service_name: service.name.clone(),
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
+    }
+
     pub async fn toggle_selected_service(&mut self) {
         if self.active_change_id.is_some() {
             self.status_message = Some("Operation already in progress".to_string());
@@ -284,41 +325,6 @@ impl App {
                 } else {
                     format!("Starting service '{}'…", service.name)
                 });
-            }
-            Err(ref e) if crate::resume::is_elevation_needed(e) => {
-                self.try_elevate_and_exec(&snap_name, None);
-                self.error = Some(e.to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-    }
-
-    pub async fn restart_selected_service(&mut self) {
-        if self.active_change_id.is_some() {
-            self.status_message = Some("Operation already in progress".to_string());
-            return;
-        }
-        let Some(idx) = self.services_state.selected() else {
-            return;
-        };
-        let Some(service) = self.snap_services.get(idx).cloned() else {
-            return;
-        };
-        let Some(snap_name) = self.managed_snap_name.clone() else {
-            return;
-        };
-
-        self.error = None;
-        self.status_message = None;
-        let service_id = format!("{}.{}", snap_name, service.name);
-        let names = [service_id.as_str()];
-        match self.client.restart_service(&names).await {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some(format!("Restarting service '{}'…", service.name));
             }
             Err(ref e) if crate::resume::is_elevation_needed(e) => {
                 self.try_elevate_and_exec(&snap_name, None);

@@ -148,7 +148,7 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
                 if app.right_pane_focused
                     && app.active_right_pane == crate::app::RightPane::Services =>
             {
-                app.restart_selected_service().await;
+                app.request_confirm_service_restart();
             }
             KeyCode::Char('r') => {
                 app.close_manage();
