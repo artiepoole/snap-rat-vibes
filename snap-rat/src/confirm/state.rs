@@ -150,6 +150,10 @@ impl App {
                                 .unwrap_or(action.label())
                         ));
                     }
+                    Err(ref e) if crate::resume::is_elevation_needed(e) => {
+                        self.try_elevate_and_exec(&snap_name, None);
+                        self.error = Some(result.unwrap_err().to_string());
+                    }
                     Err(e) => {
                         self.error = Some(e.to_string());
                     }
