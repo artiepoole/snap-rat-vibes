@@ -17,7 +17,7 @@ pub(crate) fn render_help(frame: &mut Frame, app: &mut App) {
     let block = Block::default()
         .title(" Help — Keybindings ")
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Cyan))
         .padding(Padding::symmetric(2, 1));
 

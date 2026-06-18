@@ -59,7 +59,7 @@ pub(crate) fn render_channel_picker(frame: &mut Frame, app: &mut App) {
             Block::default()
                 .title(format!(" {title} "))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Yellow))
                 .padding(Padding::horizontal(1)),
         )
@@ -88,7 +88,7 @@ pub(crate) fn render_channel_input(frame: &mut Frame, app: &mut App) {
     let block = Block::default()
         .title(format!(" {action_label} "))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Yellow))
         .padding(Padding::horizontal(1));
 
