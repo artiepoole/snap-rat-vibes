@@ -98,10 +98,10 @@ impl ManageAction {
     pub fn label(&self) -> &'static str {
         match self {
             ManageAction::Install => "Install",
-            ManageAction::InstallFromChannel => "Install from channel…",
+            ManageAction::InstallFromChannel => "Install from channel →",
             ManageAction::InstallLocalFile => "Install from local file",
             ManageAction::Refresh => "Refresh to latest",
-            ManageAction::SwitchChannel => "Switch channel…",
+            ManageAction::SwitchChannel => "Switch channel →",
             ManageAction::Revert => "Revert to previous version",
             ManageAction::Enable => "Enable",
             ManageAction::Disable => "Disable",

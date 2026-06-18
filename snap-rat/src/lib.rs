@@ -146,12 +146,6 @@ fn ui(frame: &mut Frame, app: &mut App) {
         changes::render_changes_sidebar(frame, app, sidebar_area);
     }
 
-    if app.mode == AppMode::ChannelPicker {
-        channels::render_channel_picker(frame, app);
-    }
-    if app.mode == AppMode::ChannelInput {
-        channels::render_channel_input(frame, app);
-    }
     if app.mode == AppMode::ClassicConfirm {
         confirm::render_classic_confirm(frame, app);
     }

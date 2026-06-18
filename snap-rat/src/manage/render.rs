@@ -7,7 +7,8 @@ use ratatui::{
 };
 use snapd_rs::Change;
 
-use crate::app::{App, ManageAction, RightPane};
+use crate::app::{App, AppMode, ManageAction, RightPane};
+use crate::channels::{render_channel_input_in, render_channel_picker_in};
 use crate::components::component_list_item;
 use crate::connections::connection_list_item;
 use crate::layout::{
@@ -77,23 +78,9 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     frame.render_widget(Paragraph::new(header_lines).block(header_block), layout[0]);
 
-    // --- Body: sub-pane or actions list ---
+    // --- Body: sub-pane, channel overlay, or actions list ---
     if app.active_right_pane != RightPane::None {
-        // Draw the dimmed actions block as a backdrop so the popup has context.
-        let backdrop = Block::default()
-            .title(" Actions ")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(backdrop, layout[1]);
-
-        // Inset by 1 cell on every side so the backdrop border peeks out.
-        let popup_area = Rect {
-            x: layout[1].x + 1,
-            y: layout[1].y + 1,
-            width: layout[1].width.saturating_sub(2),
-            height: layout[1].height.saturating_sub(2),
-        };
+        let popup_area = actions_popup_area(frame, app, layout[1]);
 
         let pane_title = match app.active_right_pane {
             RightPane::None => unreachable!(),
@@ -135,6 +122,20 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
                 render_services_content(frame, app, inner, &snap);
             }
         }
+    } else if app.mode == AppMode::ChannelPicker {
+        let popup_area = actions_popup_area(frame, app, layout[1]);
+        app.manage_actions_area = None;
+        app.connections_inner_area = None;
+        app.components_inner_area = None;
+        app.services_inner_area = None;
+        render_channel_picker_in(frame, app, popup_area);
+    } else if app.mode == AppMode::ChannelInput {
+        let popup_area = actions_popup_area(frame, app, layout[1]);
+        app.manage_actions_area = None;
+        app.connections_inner_area = None;
+        app.components_inner_area = None;
+        app.services_inner_area = None;
+        render_channel_input_in(frame, app, popup_area);
     } else {
         app.connections_inner_area = None;
         app.components_inner_area = None;
@@ -184,6 +185,22 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     if let Some(change) = &app.active_change {
         render_change_progress(frame, change, layout[2]);
+    }
+}
+
+/// Draws the dimmed "Actions" backdrop and returns the popup area inset by 1 cell.
+fn actions_popup_area(frame: &mut Frame, _app: &mut App, slot: Rect) -> Rect {
+    let backdrop = Block::default()
+        .title(" Actions ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(backdrop, slot);
+    Rect {
+        x: slot.x + 1,
+        y: slot.y + 1,
+        width: slot.width.saturating_sub(2),
+        height: slot.height.saturating_sub(2),
     }
 }
 
