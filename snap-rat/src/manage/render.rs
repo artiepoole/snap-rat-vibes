@@ -29,68 +29,7 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|change| (change.tasks.len() as u16).saturating_add(4).min(10))
         .unwrap_or(0);
 
-    // When a sub-pane is open, show it full-width (no header, no actions).
-    if app.active_right_pane != RightPane::None {
-        let mut layout_constraints = vec![Constraint::Min(0)];
-        if progress_height > 0 {
-            layout_constraints.push(Constraint::Length(progress_height));
-        }
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(layout_constraints)
-            .split(area);
-
-        let pane_title = match app.active_right_pane {
-            RightPane::None => unreachable!(),
-            RightPane::Connections => " Connections  [Esc] back ",
-            RightPane::Components => " Components  [Esc] back ",
-            RightPane::Services => " Services  [Esc] back ",
-        };
-
-        let pane_block = Block::default()
-            .title(pane_title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
-            .padding(Padding::horizontal(1));
-        let inner = pane_block.inner(layout[0]);
-        frame.render_widget(pane_block, layout[0]);
-
-        app.manage_actions_area = None;
-        let connection_items = app.connection_items();
-        match app.active_right_pane {
-            RightPane::None => unreachable!(),
-            RightPane::Connections => {
-                app.connections_inner_area = Some(inner);
-                app.components_inner_area = None;
-                app.services_inner_area = None;
-                render_connections_content(frame, app, inner, &snap, &connection_items);
-            }
-            RightPane::Components => {
-                app.connections_inner_area = None;
-                app.components_inner_area = Some(inner);
-                app.services_inner_area = None;
-                render_components_content(frame, app, inner, &snap);
-            }
-            RightPane::Services => {
-                app.connections_inner_area = None;
-                app.components_inner_area = None;
-                app.services_inner_area = Some(inner);
-                render_services_content(frame, app, inner, &snap);
-            }
-        }
-
-        if let Some(change) = &app.active_change {
-            render_change_progress(frame, change, layout[1]);
-        }
-        return;
-    }
-
-    // Default: full-width manage pane (header + actions list).
-    app.connections_inner_area = None;
-    app.components_inner_area = None;
-    app.services_inner_area = None;
-
+    // Always render: header (6 rows) + body (actions list or sub-pane) + optional progress.
     let mut constraints = vec![Constraint::Length(6), Constraint::Min(0)];
     if progress_height > 0 {
         constraints.push(Constraint::Length(progress_height));
@@ -100,6 +39,7 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
         .constraints(constraints)
         .split(area);
 
+    // --- Header (always visible) ---
     let header_block = Block::default()
         .title(" Manage ")
         .borders(Borders::ALL)
@@ -135,49 +75,95 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
             Span::raw(format_size(size)),
         ]));
     }
-
     frame.render_widget(Paragraph::new(header_lines).block(header_block), layout[0]);
 
-    let action_block = Block::default()
-        .title(" Actions ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
+    // --- Body: sub-pane or actions list ---
+    if app.active_right_pane != RightPane::None {
+        let pane_title = match app.active_right_pane {
+            RightPane::None => unreachable!(),
+            RightPane::Connections => " Connections  [Esc] back ",
+            RightPane::Components => " Components  [Esc] back ",
+            RightPane::Services => " Services  [Esc] back ",
+        };
 
-    let action_items: Vec<ListItem> = app
-        .manage_actions
-        .iter()
-        .map(|a| {
-            let style = match a {
-                ManageAction::Uninstall | ManageAction::UninstallPurge => {
-                    Style::default().fg(Color::Red)
-                }
-                ManageAction::Install
-                | ManageAction::Refresh
-                | ManageAction::SwitchChannel
-                | ManageAction::InstallFromChannel => Style::default().fg(Color::Green),
-                ManageAction::OpenStorePage | ManageAction::OpenContactPage => {
-                    Style::default().fg(Color::Cyan)
-                }
-                ManageAction::OpenConnections
-                | ManageAction::OpenComponents
-                | ManageAction::OpenServices => Style::default().fg(Color::Yellow),
-                _ => Style::default().fg(Color::White),
-            };
-            ListItem::new(Line::from(Span::styled(a.label(), style)))
-        })
-        .collect();
+        let pane_block = Block::default()
+            .title(pane_title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan))
+            .padding(Padding::horizontal(1));
+        let inner = pane_block.inner(layout[1]);
+        frame.render_widget(pane_block, layout[1]);
 
-    let action_list = List::new(action_items)
-        .block(action_block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
-    frame.render_stateful_widget(action_list, layout[1], &mut app.manage_state);
-    app.manage_actions_area = Some(layout[1]);
+        app.manage_actions_area = None;
+        let connection_items = app.connection_items();
+        match app.active_right_pane {
+            RightPane::None => unreachable!(),
+            RightPane::Connections => {
+                app.connections_inner_area = Some(inner);
+                app.components_inner_area = None;
+                app.services_inner_area = None;
+                render_connections_content(frame, app, inner, &snap, &connection_items);
+            }
+            RightPane::Components => {
+                app.connections_inner_area = None;
+                app.components_inner_area = Some(inner);
+                app.services_inner_area = None;
+                render_components_content(frame, app, inner, &snap);
+            }
+            RightPane::Services => {
+                app.connections_inner_area = None;
+                app.components_inner_area = None;
+                app.services_inner_area = Some(inner);
+                render_services_content(frame, app, inner, &snap);
+            }
+        }
+    } else {
+        app.connections_inner_area = None;
+        app.components_inner_area = None;
+        app.services_inner_area = None;
+
+        let action_block = Block::default()
+            .title(" Actions ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let action_items: Vec<ListItem> = app
+            .manage_actions
+            .iter()
+            .map(|a| {
+                let style = match a {
+                    ManageAction::Uninstall | ManageAction::UninstallPurge => {
+                        Style::default().fg(Color::Red)
+                    }
+                    ManageAction::Install
+                    | ManageAction::Refresh
+                    | ManageAction::SwitchChannel
+                    | ManageAction::InstallFromChannel => Style::default().fg(Color::Green),
+                    ManageAction::OpenStorePage | ManageAction::OpenContactPage => {
+                        Style::default().fg(Color::Cyan)
+                    }
+                    ManageAction::OpenConnections
+                    | ManageAction::OpenComponents
+                    | ManageAction::OpenServices => Style::default().fg(Color::Yellow),
+                    _ => Style::default().fg(Color::White),
+                };
+                ListItem::new(Line::from(Span::styled(a.label(), style)))
+            })
+            .collect();
+
+        let action_list = List::new(action_items)
+            .block(action_block)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+        frame.render_stateful_widget(action_list, layout[1], &mut app.manage_state);
+        app.manage_actions_area = Some(layout[1]);
+    }
 
     if let Some(change) = &app.active_change {
         render_change_progress(frame, change, layout[2]);
