@@ -228,6 +228,10 @@ fn render_connections_content(
             area,
         );
     } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
         let items: Vec<ListItem> = connection_items.iter().map(connection_list_item).collect();
         let list = List::new(items)
             .highlight_style(if app.right_pane_focused {
@@ -242,7 +246,16 @@ fn render_connections_content(
             } else {
                 "▷ "
             });
-        frame.render_stateful_widget(list, area, &mut app.connections_state);
+        frame.render_stateful_widget(list, chunks[0], &mut app.connections_state);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled("connected  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled("disconnected", Style::default().fg(Color::DarkGray)),
+            ])),
+            chunks[1],
+        );
     }
 }
 
@@ -269,6 +282,10 @@ fn render_components_content(
             area,
         );
     } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
         let components = app.snap_components.clone();
         let items: Vec<ListItem> = components.iter().map(component_list_item).collect();
         let list = List::new(items)
@@ -284,7 +301,16 @@ fn render_components_content(
             } else {
                 "▷ "
             });
-        frame.render_stateful_widget(list, area, &mut app.components_state);
+        frame.render_stateful_widget(list, chunks[0], &mut app.components_state);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled("installed  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled("not installed", Style::default().fg(Color::DarkGray)),
+            ])),
+            chunks[1],
+        );
     }
 }
 
