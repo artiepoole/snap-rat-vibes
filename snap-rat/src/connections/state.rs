@@ -334,56 +334,6 @@ impl App {
         self.mode = AppMode::Confirm;
     }
 
-    pub async fn toggle_selected_component(&mut self) {
-        if self.active_change_id.is_some() {
-            self.status_message = Some("Operation already in progress".to_string());
-            return;
-        }
-        let Some(idx) = self.components_state.selected() else {
-            return;
-        };
-        let Some(component) = self.snap_components.get(idx).cloned() else {
-            return;
-        };
-        let Some(snap_name) = self.managed_snap_name.clone() else {
-            return;
-        };
-
-        self.error = None;
-        self.status_message = None;
-
-        let result = if component.install_date.is_some() {
-            // Component is installed — remove it
-            self.client
-                .remove_snap_component(&snap_name, &component.name)
-                .await
-        } else {
-            // Component is not installed — install it
-            self.client
-                .install_snap_component(&snap_name, &component.name)
-                .await
-        };
-
-        match result {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some(if component.install_date.is_some() {
-                    format!("Removing component '{}'…", component.name)
-                } else {
-                    format!("Installing component '{}'…", component.name)
-                });
-            }
-            Err(ref e) if crate::resume::is_elevation_needed(e) => {
-                self.try_elevate_and_exec(&snap_name, None);
-                self.error = Some(e.to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-    }
-
     pub async fn connect_selected(&mut self) {
         if self.active_change_id.is_some() {
             self.status_message = Some("Operation already in progress".to_string());
