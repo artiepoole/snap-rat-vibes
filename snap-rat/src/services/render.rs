@@ -9,32 +9,40 @@ pub(crate) fn service_list_item(service: &AppInfo) -> ListItem<'static> {
     let active = service.active == Some(true);
     let enabled = service.enabled != Some(false);
 
-    let marker = if active {
-        Span::styled("● ", Style::default().fg(Color::Green))
-    } else {
-        Span::styled("○ ", Style::default().fg(Color::DarkGray))
+    // Four states with distinct symbols and colours.
+    let (marker, name_color, status_span) = match (active, enabled) {
+        // Running and enabled — healthy.
+        (true, true) => (
+            Span::styled("● ", Style::default().fg(Color::Green)),
+            Color::White,
+            Span::styled("  running", Style::default().fg(Color::Green)),
+        ),
+        // Running but disabled — will stop on next reboot.
+        (true, false) => (
+            Span::styled("● ", Style::default().fg(Color::Yellow)),
+            Color::White,
+            Span::styled(
+                "  running (disabled)",
+                Style::default().fg(Color::Yellow),
+            ),
+        ),
+        // Stopped but enabled — likely failed or crashed.
+        (false, true) => (
+            Span::styled("✗ ", Style::default().fg(Color::Red)),
+            Color::Red,
+            Span::styled("  stopped", Style::default().fg(Color::Red)),
+        ),
+        // Stopped and disabled — intentionally off.
+        (false, false) => (
+            Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+            Color::DarkGray,
+            Span::styled("  stopped (disabled)", Style::default().fg(Color::DarkGray)),
+        ),
     };
 
-    let mut spans = vec![
+    ListItem::new(Line::from(vec![
         marker,
-        Span::styled(
-            service.name.clone(),
-            Style::default().fg(Color::White).bold(),
-        ),
-    ];
-
-    if active {
-        spans.push(Span::styled("  running", Style::default().fg(Color::Green)));
-    } else {
-        spans.push(Span::styled(
-            "  stopped",
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-
-    if !enabled {
-        spans.push(Span::styled(" (disabled)", Style::default().fg(Color::Red)));
-    }
-
-    ListItem::new(Line::from(spans))
+        Span::styled(service.name.clone(), Style::default().fg(name_color).bold()),
+        status_span,
+    ]))
 }
