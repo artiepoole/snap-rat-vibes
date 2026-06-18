@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use image::DynamicImage;
 use ratatui::{layout::Rect, widgets::ListState};
-use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
+use ratatui_image::picker::{Capability, Picker, ProtocolType, cap_parser::QueryStdioOptions};
 use snapd_rs::{
     AppInfo, Change, ChannelSnapInfo, ComponentInfo, SnapdClient, StoreSnap,
     api::{
@@ -355,31 +355,43 @@ impl App {
             slot_picker_plug: None,
             slot_picker_items: vec![],
             slot_picker_state: ListState::default(),
-            icon_picker: Picker::from_query_stdio_with_options(QueryStdioOptions {
-                // Ask the terminal for its background colour via OSC 11 so that
-                // transparent PNG icons are composited correctly instead of
-                // rendering transparency as black.
-                terminal_background_color_osc: true,
-                ..Default::default()
-            })
-            .ok()
-            .map(|mut picker| {
-                // Apply the queried background colour, or fall back to a dark
-                // default that matches most terminal themes.
-                let bg = picker
-                    .capabilities()
-                    .iter()
-                    .find_map(|c| {
-                        if let Capability::Background(r, g, b) = c {
-                            Some(image::Rgba([*r, *g, *b, 255u8]))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(image::Rgba([30u8, 30u8, 30u8, 255u8]));
-                picker.set_background_color(Some(bg));
-                picker
-            }),
+            icon_picker: if !crate::symbols::is_unicode() {
+                // ASCII/dumb terminal: skip the OSC query and force Halfblocks,
+                // which uses chafa to render the icon using ASCII characters and
+                // ANSI colours rather than Unicode block elements.
+                Some({
+                    let mut picker = Picker::halfblocks();
+                    picker.set_protocol_type(ProtocolType::Halfblocks);
+                    picker.set_background_color(Some(image::Rgba([30u8, 30u8, 30u8, 255u8])));
+                    picker
+                })
+            } else {
+                Picker::from_query_stdio_with_options(QueryStdioOptions {
+                    // Ask the terminal for its background colour via OSC 11 so that
+                    // transparent PNG icons are composited correctly instead of
+                    // rendering transparency as black.
+                    terminal_background_color_osc: true,
+                    ..Default::default()
+                })
+                .ok()
+                .map(|mut picker| {
+                    // Apply the queried background colour, or fall back to a dark
+                    // default that matches most terminal themes.
+                    let bg = picker
+                        .capabilities()
+                        .iter()
+                        .find_map(|c| {
+                            if let Capability::Background(r, g, b) = c {
+                                Some(image::Rgba([*r, *g, *b, 255u8]))
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(image::Rgba([30u8, 30u8, 30u8, 255u8]));
+                    picker.set_background_color(Some(bg));
+                    picker
+                })
+            },
             icon_cache: HashMap::default(),
             icon_fetching: HashSet::default(),
             confirm_pending: None,
