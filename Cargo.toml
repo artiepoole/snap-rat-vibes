@@ -22,7 +22,7 @@ ratatui = "0.30"
 crossterm = "0.29"
 anyhow = "1"
 libc = "0.2"
-ratatui-image = { version = "11", default-features = false, features = ["image-defaults", "crossterm"] }
+ratatui-image = { version = "11", default-features = false, features = ["image-defaults", "crossterm", "chafa-static"] }
 image = "0.25"
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
