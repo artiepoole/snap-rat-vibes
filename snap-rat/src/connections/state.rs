@@ -110,7 +110,13 @@ impl App {
             RightPane::None => {}
             RightPane::Connections => self.connections_next(),
             RightPane::Components => self.components_next(),
-            RightPane::Services => self.services_next(),
+            RightPane::Services => {
+                if self.service_actions_open {
+                    self.service_action_next();
+                } else {
+                    self.services_next();
+                }
+            }
         }
     }
 
@@ -119,7 +125,13 @@ impl App {
             RightPane::None => {}
             RightPane::Connections => self.connections_prev(),
             RightPane::Components => self.components_prev(),
-            RightPane::Services => self.services_prev(),
+            RightPane::Services => {
+                if self.service_actions_open {
+                    self.service_action_prev();
+                } else {
+                    self.services_prev();
+                }
+            }
         }
     }
 
@@ -160,6 +172,7 @@ impl App {
     pub fn close_right_pane_focus(&mut self) {
         self.right_pane_focused = false;
         self.active_right_pane = crate::app::RightPane::None;
+        self.close_service_action_menu();
         if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
             self.manage_state.select(Some(0));
         }
@@ -191,9 +204,117 @@ impl App {
             }
             RightPane::Services => {
                 self.services_activated = false;
-                self.request_confirm_service_toggle();
+                if self.service_actions_open {
+                    self.confirm_selected_service_action();
+                } else {
+                    self.open_service_action_menu();
+                }
             }
         }
+    }
+
+    /// Build the action list for the currently-selected service and open the menu.
+    pub fn open_service_action_menu(&mut self) {
+        let Some(idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(idx) else {
+            return;
+        };
+        let active = service.active == Some(true);
+        let enabled = service.enabled != Some(false);
+
+        let actions = match (active, enabled) {
+            (true, true) => vec![
+                crate::app::ServiceAction::Restart,
+                crate::app::ServiceAction::Stop,
+                crate::app::ServiceAction::Disable,
+            ],
+            (true, false) => vec![
+                crate::app::ServiceAction::Restart,
+                crate::app::ServiceAction::Stop,
+                crate::app::ServiceAction::Enable,
+            ],
+            (false, true) => vec![
+                crate::app::ServiceAction::Start,
+                crate::app::ServiceAction::Restart,
+                crate::app::ServiceAction::Disable,
+            ],
+            (false, false) => vec![
+                crate::app::ServiceAction::Start,
+                crate::app::ServiceAction::Enable,
+            ],
+        };
+
+        self.service_actions = actions;
+        self.service_actions_state = ratatui::widgets::ListState::default();
+        self.service_actions_state.select(Some(0));
+        self.service_actions_open = true;
+    }
+
+    pub fn close_service_action_menu(&mut self) {
+        self.service_actions_open = false;
+        self.service_actions = vec![];
+        self.service_actions_state = ratatui::widgets::ListState::default();
+    }
+
+    pub fn service_action_next(&mut self) {
+        let len = self.service_actions.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.service_actions_state.selected() {
+            Some(i) => (i + 1).min(len - 1),
+            None => 0,
+        };
+        self.service_actions_state.select(Some(i));
+    }
+
+    pub fn service_action_prev(&mut self) {
+        let len = self.service_actions.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.service_actions_state.selected() {
+            Some(0) | None => 0,
+            Some(i) => i - 1,
+        };
+        self.service_actions_state.select(Some(i));
+    }
+
+    pub fn confirm_selected_service_action(&mut self) {
+        let Some(action_idx) = self.service_actions_state.selected() else {
+            return;
+        };
+        let Some(action) = self.service_actions.get(action_idx).cloned() else {
+            return;
+        };
+        let Some(svc_idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(svc_idx) else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        let service_name = service.name.clone();
+        self.confirm_message = Some(format!(
+            "{} service '{}'?",
+            action
+                .label()
+                .split_once("  ")
+                .map(|(l, _)| l)
+                .unwrap_or(action.label()),
+            service_name
+        ));
+        self.confirm_pending = Some(ConfirmPending::ServiceAction {
+            snap_name,
+            service_name,
+            action,
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
     }
 
     pub async fn toggle_selected_component(&mut self) {
@@ -234,96 +355,6 @@ impl App {
                     format!("Removing component '{}'…", component.name)
                 } else {
                     format!("Installing component '{}'…", component.name)
-                });
-            }
-            Err(ref e) if crate::resume::is_elevation_needed(e) => {
-                self.try_elevate_and_exec(&snap_name, None);
-                self.error = Some(e.to_string());
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-            }
-        }
-    }
-
-    pub fn request_confirm_service_toggle(&mut self) {
-        let Some(idx) = self.services_state.selected() else {
-            return;
-        };
-        let Some(service) = self.snap_services.get(idx).cloned() else {
-            return;
-        };
-        let Some(snap_name) = self.managed_snap_name.clone() else {
-            return;
-        };
-        let is_running = service.active == Some(true);
-        let action_word = if is_running { "Stop" } else { "Start" };
-        self.confirm_message = Some(format!("{action_word} service '{}'?", service.name));
-        self.confirm_pending = Some(ConfirmPending::ServiceToggle {
-            snap_name,
-            service_name: service.name.clone(),
-            is_running,
-        });
-        self.confirm_hovered = Some(false);
-        self.mode = AppMode::Confirm;
-    }
-
-    pub fn request_confirm_service_restart(&mut self) {
-        let Some(idx) = self.services_state.selected() else {
-            return;
-        };
-        let Some(service) = self.snap_services.get(idx).cloned() else {
-            return;
-        };
-        let Some(snap_name) = self.managed_snap_name.clone() else {
-            return;
-        };
-        self.confirm_message = Some(format!("Restart service '{}'?", service.name));
-        self.confirm_pending = Some(ConfirmPending::ServiceRestart {
-            snap_name,
-            service_name: service.name.clone(),
-        });
-        self.confirm_hovered = Some(false);
-        self.mode = AppMode::Confirm;
-    }
-
-    pub async fn toggle_selected_service(&mut self) {
-        if self.active_change_id.is_some() {
-            self.status_message = Some("Operation already in progress".to_string());
-            return;
-        }
-        let Some(idx) = self.services_state.selected() else {
-            return;
-        };
-        let Some(service) = self.snap_services.get(idx).cloned() else {
-            return;
-        };
-        let Some(snap_name) = self.managed_snap_name.clone() else {
-            return;
-        };
-
-        self.error = None;
-        self.status_message = None;
-
-        let service_id = format!("{}.{}", snap_name, service.name);
-        let names = [service_id.as_str()];
-
-        let result = if service.active == Some(true) {
-            // Service is running — stop it
-            self.client.stop_service(&names).await
-        } else {
-            // Service is not running — start it
-            self.client.start_service(&names).await
-        };
-
-        match result {
-            Ok(change_id) => {
-                self.active_change_id = Some(change_id.0);
-                self.active_change = None;
-                self.status_message = Some(if service.active == Some(true) {
-                    format!("Stopping service '{}'…", service.name)
-                } else {
-                    format!("Starting service '{}'…", service.name)
                 });
             }
             Err(ref e) if crate::resume::is_elevation_needed(e) => {

@@ -43,6 +43,22 @@ impl SnapdClient {
         .await
     }
 
+    pub async fn enable_service(&self, services: &[&str]) -> Result<ChangeId> {
+        self.post_async(
+            "/v2/apps",
+            &json!({ "action": "start", "names": services, "enable": true }),
+        )
+        .await
+    }
+
+    pub async fn disable_service(&self, services: &[&str]) -> Result<ChangeId> {
+        self.post_async(
+            "/v2/apps",
+            &json!({ "action": "stop", "names": services, "disable": true }),
+        )
+        .await
+    }
+
     /// List services (daemon apps) for a specific snap.
     pub async fn list_snap_services(&self, snap_name: &str) -> Result<Vec<AppInfo>> {
         let apps: Vec<AppInfo> = self.get(&format!("/v2/apps?names={snap_name}")).await?;

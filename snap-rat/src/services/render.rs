@@ -21,10 +21,7 @@ pub(crate) fn service_list_item(service: &AppInfo) -> ListItem<'static> {
         (true, false) => (
             Span::styled("● ", Style::default().fg(Color::Yellow)),
             Color::White,
-            Span::styled(
-                "  running (disabled)",
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled("  running (disabled)", Style::default().fg(Color::Yellow)),
         ),
         // Stopped but enabled — likely failed or crashed.
         (false, true) => (

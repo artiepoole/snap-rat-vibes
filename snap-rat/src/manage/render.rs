@@ -336,6 +336,8 @@ fn render_services_content(
             Paragraph::new("No services").style(Style::default().fg(Color::DarkGray).italic()),
             area,
         );
+    } else if app.service_actions_open {
+        render_service_action_menu(frame, app, area);
     } else {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -373,6 +375,65 @@ fn render_services_content(
             chunks[1],
         );
     }
+}
+
+fn render_service_action_menu(frame: &mut Frame, app: &mut App, area: Rect) {
+    use crate::app::ServiceAction;
+
+    // Find the selected service for the header.
+    let service_name = app
+        .services_state
+        .selected()
+        .and_then(|i| app.snap_services.get(i))
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    // Header: service name + back hint.
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("⚙ ", Style::default().fg(Color::Cyan)),
+                Span::styled(service_name, Style::default().fg(Color::Cyan).bold()),
+            ]),
+            Line::from(Span::styled(
+                "[Esc] back",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]),
+        chunks[0],
+    );
+
+    let actions = app.service_actions.clone();
+    let action_items: Vec<ListItem> = actions
+        .iter()
+        .map(|a| {
+            let (symbol, color) = match a {
+                ServiceAction::Start => ("▶ ", Color::Green),
+                ServiceAction::Enable => ("▶ ", Color::Green),
+                ServiceAction::Stop => ("■ ", Color::Red),
+                ServiceAction::Disable => ("■ ", Color::Red),
+                ServiceAction::Restart => ("↺ ", Color::Cyan),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(symbol, Style::default().fg(color)),
+                Span::styled(a.label(), Style::default().fg(Color::White)),
+            ]))
+        })
+        .collect();
+
+    let action_list = List::new(action_items)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(action_list, chunks[1], &mut app.service_actions_state);
 }
 
 pub(crate) fn render_change_progress(frame: &mut Frame, change: &Change, area: Rect) {

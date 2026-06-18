@@ -42,6 +42,28 @@ pub enum AppMode {
 }
 
 /// The action that will execute once the user confirms the `Confirm` dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceAction {
+    Start,
+    Stop,
+    Enable,  // start + mark for auto-start on boot
+    Disable, // stop + remove auto-start on boot
+    Restart,
+}
+
+impl ServiceAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ServiceAction::Start => "Start",
+            ServiceAction::Stop => "Stop",
+            ServiceAction::Enable => "Enable  (start on boot)",
+            ServiceAction::Disable => "Disable  (stop, no auto-start)",
+            ServiceAction::Restart => "Restart",
+        }
+    }
+}
+
+/// The action that will execute once the user confirms the `Confirm` dialog.
 #[derive(Debug, Clone)]
 pub enum ConfirmPending {
     Action(ManageAction),
@@ -54,15 +76,11 @@ pub enum ConfirmPending {
         interface_name: String,
         slot: SlotRef,
     },
-    /// Start or stop a service (is_running = current state before action).
-    ServiceToggle {
+    /// An action on a specific service (start/stop/enable/disable/restart).
+    ServiceAction {
         snap_name: String,
         service_name: String,
-        is_running: bool,
-    },
-    ServiceRestart {
-        snap_name: String,
-        service_name: String,
+        action: ServiceAction,
     },
 }
 
@@ -213,6 +231,10 @@ pub struct App {
     pub services_state: ListState,
     pub services_activated: bool,
     pub services_loading: bool,
+    /// Drill-down action menu shown when a service is selected.
+    pub service_actions_open: bool,
+    pub service_actions: Vec<ServiceAction>,
+    pub service_actions_state: ListState,
     /// Plug being connected — shown in slot picker overlay.
     pub slot_picker_plug: Option<ConnectionItem>,
     /// Available slots to connect to (populated when entering SlotPicker mode).
@@ -317,6 +339,9 @@ impl App {
             services_state: ListState::default(),
             services_activated: false,
             services_loading: false,
+            service_actions_open: false,
+            service_actions: vec![],
+            service_actions_state: ListState::default(),
             slot_picker_plug: None,
             slot_picker_items: vec![],
             slot_picker_state: ListState::default(),

@@ -1,4 +1,4 @@
-use crate::app::{App, AppMode, ConfirmPending, ManageAction};
+use crate::app::{App, AppMode, ConfirmPending, ManageAction, ServiceAction};
 
 impl App {
     pub fn request_confirm_action(&mut self, action: ManageAction) {
@@ -48,14 +48,12 @@ impl App {
 
     pub fn cancel_confirm(&mut self) {
         let return_mode = match &self.confirm_pending {
-            Some(ConfirmPending::ServiceToggle { .. })
-            | Some(ConfirmPending::ServiceRestart { .. }) => AppMode::Manage,
+            Some(ConfirmPending::ServiceAction { .. }) => AppMode::Manage,
             _ => AppMode::Browse,
         };
         self.confirm_pending = None;
         self.confirm_message = None;
         self.confirm_hovered = None;
-        // If there are queued auto-connect prompts, drop the current one and show the next.
         if !self.auto_connect_queue.is_empty() {
             self.auto_connect_queue.remove(0);
             self.mode = AppMode::Browse;
@@ -120,10 +118,10 @@ impl App {
                 // is already drained for this item).
                 self.pop_auto_connect_prompt();
             }
-            ConfirmPending::ServiceToggle {
+            ConfirmPending::ServiceAction {
                 snap_name,
                 service_name,
-                is_running,
+                action,
             } => {
                 self.confirm_hovered = None;
                 self.mode = AppMode::Manage;
@@ -131,41 +129,25 @@ impl App {
                 self.status_message = None;
                 let service_id = format!("{snap_name}.{service_name}");
                 let names = [service_id.as_str()];
-                let result = if is_running {
-                    self.client.stop_service(&names).await
-                } else {
-                    self.client.start_service(&names).await
+                let result = match action {
+                    ServiceAction::Start => self.client.start_service(&names).await,
+                    ServiceAction::Stop => self.client.stop_service(&names).await,
+                    ServiceAction::Enable => self.client.enable_service(&names).await,
+                    ServiceAction::Disable => self.client.disable_service(&names).await,
+                    ServiceAction::Restart => self.client.restart_service(&names).await,
                 };
                 match result {
                     Ok(change_id) => {
                         self.active_change_id = Some(change_id.0);
                         self.active_change = None;
-                        self.status_message = Some(if is_running {
-                            format!("Stopping service '{service_name}'…")
-                        } else {
-                            format!("Starting service '{service_name}'…")
-                        });
-                    }
-                    Err(e) => {
-                        self.error = Some(e.to_string());
-                    }
-                }
-            }
-            ConfirmPending::ServiceRestart {
-                snap_name,
-                service_name,
-            } => {
-                self.confirm_hovered = None;
-                self.mode = AppMode::Manage;
-                self.error = None;
-                self.status_message = None;
-                let service_id = format!("{snap_name}.{service_name}");
-                let names = [service_id.as_str()];
-                match self.client.restart_service(&names).await {
-                    Ok(change_id) => {
-                        self.active_change_id = Some(change_id.0);
-                        self.active_change = None;
-                        self.status_message = Some(format!("Restarting service '{service_name}'…"));
+                        self.status_message = Some(format!(
+                            "{} service '{service_name}'…",
+                            action
+                                .label()
+                                .split_once("  ")
+                                .map(|(l, _)| l)
+                                .unwrap_or(action.label())
+                        ));
                     }
                     Err(e) => {
                         self.error = Some(e.to_string());

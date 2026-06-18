@@ -110,6 +110,13 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
             _ => {}
         },
         AppMode::Manage => match key.code {
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h')
+                if app.right_pane_focused
+                    && app.active_right_pane == crate::app::RightPane::Services
+                    && app.service_actions_open =>
+            {
+                app.close_service_action_menu();
+            }
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') if app.right_pane_focused => {
                 app.close_right_pane_focus()
             }
@@ -144,12 +151,6 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
                 }
             }
             KeyCode::Char('p') => app.toggle_changes_sidebar(),
-            KeyCode::Char('r')
-                if app.right_pane_focused
-                    && app.active_right_pane == crate::app::RightPane::Services =>
-            {
-                app.request_confirm_service_restart();
-            }
             KeyCode::Char('r') => {
                 app.close_manage();
                 app.reload().await;

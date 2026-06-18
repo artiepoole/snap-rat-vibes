@@ -253,7 +253,7 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                             app.services_state.selected() == Some(idx);
                                         app.services_state.select(Some(idx));
                                         if already_selected && !app.services_activated {
-                                            app.toggle_selected_service().await;
+                                            app.open_service_action_menu();
                                         } else {
                                             app.services_activated = false;
                                             app.manage_activated = false;
