@@ -79,6 +79,22 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // --- Body: sub-pane or actions list ---
     if app.active_right_pane != RightPane::None {
+        // Draw the dimmed actions block as a backdrop so the popup has context.
+        let backdrop = Block::default()
+            .title(" Actions ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(backdrop, layout[1]);
+
+        // Inset by 1 cell on every side so the backdrop border peeks out.
+        let popup_area = Rect {
+            x: layout[1].x + 1,
+            y: layout[1].y + 1,
+            width: layout[1].width.saturating_sub(2),
+            height: layout[1].height.saturating_sub(2),
+        };
+
         let pane_title = match app.active_right_pane {
             RightPane::None => unreachable!(),
             RightPane::Connections => " Connections  [Esc] back ",
@@ -89,11 +105,12 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
         let pane_block = Block::default()
             .title(pane_title)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Double)
             .border_style(Style::default().fg(Color::Cyan))
             .padding(Padding::horizontal(1));
-        let inner = pane_block.inner(layout[1]);
-        frame.render_widget(pane_block, layout[1]);
+        let inner = pane_block.inner(popup_area);
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(pane_block, popup_area);
 
         app.manage_actions_area = None;
         let connection_items = app.connection_items();
