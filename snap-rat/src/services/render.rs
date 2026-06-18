@@ -7,10 +7,11 @@ use snapd_rs::AppInfo;
 
 pub(crate) fn service_list_item(service: &AppInfo) -> ListItem<'static> {
     let active = service.active == Some(true);
-    let enabled = service.enabled != Some(false);
+    // Only treat as explicitly enabled if snapd says so.
+    let explicitly_enabled = service.enabled == Some(true);
 
     // Four states with distinct symbols and colours.
-    let (marker, name_color, status_span) = match (active, enabled) {
+    let (marker, name_color, status_span) = match (active, explicitly_enabled) {
         // Running and enabled — healthy.
         (true, true) => (
             Span::styled("● ", Style::default().fg(Color::Green)),

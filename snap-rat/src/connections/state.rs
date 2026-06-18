@@ -222,29 +222,24 @@ impl App {
             return;
         };
         let active = service.active == Some(true);
-        let enabled = service.enabled != Some(false);
+        // Only treat as explicitly enabled if snapd says so; None means unknown → not enabled.
+        let explicitly_enabled = service.enabled == Some(true);
+        let explicitly_disabled = service.enabled == Some(false);
 
-        let actions = match (active, enabled) {
-            (true, true) => vec![
-                crate::app::ServiceAction::Restart,
-                crate::app::ServiceAction::Stop,
-                crate::app::ServiceAction::Disable,
-            ],
-            (true, false) => vec![
-                crate::app::ServiceAction::Restart,
-                crate::app::ServiceAction::Stop,
-                crate::app::ServiceAction::Enable,
-            ],
-            (false, true) => vec![
-                crate::app::ServiceAction::Start,
-                crate::app::ServiceAction::Restart,
-                crate::app::ServiceAction::Disable,
-            ],
-            (false, false) => vec![
-                crate::app::ServiceAction::Start,
-                crate::app::ServiceAction::Enable,
-            ],
-        };
+        let mut actions: Vec<crate::app::ServiceAction> = vec![];
+        if !active {
+            actions.push(crate::app::ServiceAction::Start);
+        }
+        actions.push(crate::app::ServiceAction::Restart);
+        if active {
+            actions.push(crate::app::ServiceAction::Stop);
+        }
+        if !explicitly_enabled {
+            actions.push(crate::app::ServiceAction::Enable);
+        }
+        if explicitly_enabled || (active && !explicitly_disabled) {
+            actions.push(crate::app::ServiceAction::Disable);
+        }
 
         self.service_actions = actions;
         self.service_actions_state = ratatui::widgets::ListState::default();
