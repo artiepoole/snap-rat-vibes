@@ -107,6 +107,7 @@ impl App {
 
     pub fn right_pane_next(&mut self) {
         match self.active_right_pane {
+            RightPane::None => {}
             RightPane::Connections => self.connections_next(),
             RightPane::Components => self.components_next(),
             RightPane::Services => self.services_next(),
@@ -115,6 +116,7 @@ impl App {
 
     pub fn right_pane_prev(&mut self) {
         match self.active_right_pane {
+            RightPane::None => {}
             RightPane::Connections => self.connections_prev(),
             RightPane::Components => self.components_prev(),
             RightPane::Services => self.services_prev(),
@@ -123,6 +125,7 @@ impl App {
 
     pub fn right_pane_page_down(&mut self) {
         match self.active_right_pane {
+            RightPane::None => {}
             RightPane::Connections => self.connections_page_down(),
             RightPane::Components => {
                 for _ in 0..10 {
@@ -139,6 +142,7 @@ impl App {
 
     pub fn right_pane_page_up(&mut self) {
         match self.active_right_pane {
+            RightPane::None => {}
             RightPane::Connections => self.connections_page_up(),
             RightPane::Components => {
                 for _ in 0..10 {
@@ -160,6 +164,7 @@ impl App {
             self.manage_state
                 .select(Some(self.manage_state.selected().unwrap_or(0)));
             match self.active_right_pane {
+                RightPane::None => {}
                 RightPane::Connections => {
                     if self.connections_state.selected().is_none()
                         && !self.connection_items().is_empty()
@@ -214,6 +219,7 @@ impl App {
 
     pub async fn activate_right_pane_item(&mut self) {
         match self.active_right_pane {
+            RightPane::None => {}
             RightPane::Connections => {
                 self.connections_activated = false;
                 self.activate_selected_connection().await;

@@ -86,12 +86,6 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if !app.search_focused => {
                 app.open_manage();
-                if let Some(snap) = app.selected_snap()
-                    && snap.installed
-                {
-                    let name = snap.name.clone();
-                    app.load_snap_interfaces(&name).await;
-                }
             }
             KeyCode::Esc | KeyCode::Left if app.search_focused => {
                 app.search_focused = false;

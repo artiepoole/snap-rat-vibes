@@ -17,6 +17,8 @@ use crate::types::DisplaySnap;
 /// Which panel is shown on the right side of the manage pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RightPane {
+    /// No pane selected yet — right side shows a placeholder.
+    None,
     Connections,
     Components,
     Services,
@@ -295,7 +297,7 @@ impl App {
             snap_connections: vec![],
             interfaces_loading: false,
             right_pane_focused: false,
-            active_right_pane: RightPane::Connections,
+            active_right_pane: RightPane::None,
             connections_state: ListState::default(),
             snap_components: vec![],
             components_state: ListState::default(),
@@ -793,6 +795,7 @@ impl App {
                             // active pane data so the state reflects the change.
                             if let Some(name) = self.selected_snap().map(|s| s.name) {
                                 match self.active_right_pane {
+                                    crate::app::RightPane::None => {}
                                     crate::app::RightPane::Connections => {
                                         self.load_snap_interfaces(&name).await;
                                     }

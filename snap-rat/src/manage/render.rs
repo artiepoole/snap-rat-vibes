@@ -133,6 +133,7 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Right pane: title and focus state
     let right_pane_title = match app.active_right_pane {
+        RightPane::None => " Details ",
         RightPane::Connections => " Connections ",
         RightPane::Components => " Components ",
         RightPane::Services => " Services ",
@@ -153,6 +154,22 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(right_pane_block, panes[1]);
 
     match app.active_right_pane {
+        RightPane::None => {
+            app.connections_inner_area = None;
+            app.components_inner_area = None;
+            app.services_inner_area = None;
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(
+                    "Select Connections →, Components →,\nor Services → from the actions list",
+                )
+                .style(
+                    ratatui::style::Style::default()
+                        .fg(Color::DarkGray)
+                        .italic(),
+                ),
+                right_inner,
+            );
+        }
         RightPane::Connections => {
             app.connections_inner_area = Some(right_inner);
             app.components_inner_area = None;

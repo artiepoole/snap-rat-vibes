@@ -63,7 +63,7 @@ impl App {
         self.snap_connections.clear();
         self.interfaces_loading = false;
         self.right_pane_focused = false;
-        self.active_right_pane = RightPane::Connections;
+        self.active_right_pane = RightPane::None;
         self.connections_state = ListState::default();
         self.connections_activated = false;
         self.snap_components.clear();
@@ -168,7 +168,7 @@ impl App {
         self.snap_connections.clear();
         self.interfaces_loading = false;
         self.right_pane_focused = false;
-        self.active_right_pane = RightPane::Connections;
+        self.active_right_pane = RightPane::None;
         self.connections_state = ListState::default();
         self.slot_picker_plug = None;
         self.slot_picker_items.clear();

@@ -177,12 +177,6 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                         if app.list_state.selected() == Some(idx) {
                                             // Second click on already-selected item: open manage.
                                             app.open_manage();
-                                            if let Some(snap) = app.selected_snap()
-                                                && snap.installed
-                                            {
-                                                let name = snap.name.clone();
-                                                app.load_snap_interfaces(&name).await;
-                                            }
                                         } else {
                                             app.list_state.select(Some(idx));
                                             app.search_focused = false;
