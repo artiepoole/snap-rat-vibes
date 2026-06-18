@@ -235,7 +235,7 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                             app.components_state.selected() == Some(idx);
                                         app.components_state.select(Some(idx));
                                         if already_selected && !app.components_activated {
-                                            app.toggle_selected_component().await;
+                                            app.request_confirm_component_toggle();
                                         } else {
                                             app.components_activated = false;
                                             app.manage_activated = false;

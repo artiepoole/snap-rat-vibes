@@ -200,7 +200,7 @@ impl App {
             }
             RightPane::Components => {
                 self.components_activated = false;
-                self.toggle_selected_component().await;
+                self.request_confirm_component_toggle();
             }
             RightPane::Services => {
                 self.services_activated = false;
@@ -307,6 +307,28 @@ impl App {
             snap_name,
             service_name,
             action,
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
+    }
+
+    pub fn request_confirm_component_toggle(&mut self) {
+        let Some(idx) = self.components_state.selected() else {
+            return;
+        };
+        let Some(component) = self.snap_components.get(idx).cloned() else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        let install = component.install_date.is_none();
+        let verb = if install { "Install" } else { "Remove" };
+        self.confirm_message = Some(format!("{verb} component '{}'?", component.name));
+        self.confirm_pending = Some(ConfirmPending::ComponentToggle {
+            snap_name,
+            component_name: component.name.clone(),
+            install,
         });
         self.confirm_hovered = Some(false);
         self.mode = AppMode::Confirm;

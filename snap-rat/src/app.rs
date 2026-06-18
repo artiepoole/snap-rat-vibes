@@ -82,6 +82,12 @@ pub enum ConfirmPending {
         service_name: String,
         action: ServiceAction,
     },
+    /// Install or remove a snap component.
+    ComponentToggle {
+        snap_name: String,
+        component_name: String,
+        install: bool, // true = install, false = remove
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

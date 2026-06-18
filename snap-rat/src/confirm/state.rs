@@ -48,7 +48,8 @@ impl App {
 
     pub fn cancel_confirm(&mut self) {
         let return_mode = match &self.confirm_pending {
-            Some(ConfirmPending::ServiceAction { .. }) => AppMode::Manage,
+            Some(ConfirmPending::ServiceAction { .. })
+            | Some(ConfirmPending::ComponentToggle { .. }) => AppMode::Manage,
             _ => AppMode::Browse,
         };
         self.confirm_pending = None;
@@ -148,6 +149,43 @@ impl App {
                                 .map(|(l, _)| l)
                                 .unwrap_or(action.label())
                         ));
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
+            }
+            ConfirmPending::ComponentToggle {
+                snap_name,
+                component_name,
+                install,
+            } => {
+                self.confirm_hovered = None;
+                self.mode = AppMode::Manage;
+                self.error = None;
+                self.status_message = None;
+                let result = if install {
+                    self.client
+                        .install_snap_component(&snap_name, &component_name)
+                        .await
+                } else {
+                    self.client
+                        .remove_snap_component(&snap_name, &component_name)
+                        .await
+                };
+                match result {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some(if install {
+                            format!("Installing component '{component_name}'…")
+                        } else {
+                            format!("Removing component '{component_name}'…")
+                        });
+                    }
+                    Err(ref e) if crate::resume::is_elevation_needed(e) => {
+                        self.try_elevate_and_exec(&snap_name, None);
+                        self.error = Some(e.to_string());
                     }
                     Err(e) => {
                         self.error = Some(e.to_string());

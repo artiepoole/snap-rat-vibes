@@ -107,6 +107,7 @@ pub(crate) fn render_confirm(frame: &mut Frame, app: &mut App) {
                 action: crate::app::ServiceAction::Disable,
                 ..
             })
+            | Some(ConfirmPending::ComponentToggle { install: false, .. })
     ) {
         Color::Red
     } else {

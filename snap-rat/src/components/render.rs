@@ -17,7 +17,13 @@ pub(crate) fn component_list_item(component: &ComponentInfo) -> ListItem<'static
         marker,
         Span::styled(
             component.name.clone(),
-            Style::default().fg(Color::White).bold(),
+            Style::default()
+                .fg(if installed {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })
+                .bold(),
         ),
     ];
 
@@ -35,10 +41,13 @@ pub(crate) fn component_list_item(component: &ComponentInfo) -> ListItem<'static
         ));
     }
 
-    if !installed {
+    // Action hint at the end.
+    if installed {
+        spans.push(Span::styled("  Remove →", Style::default().fg(Color::Red)));
+    } else {
         spans.push(Span::styled(
-            "  [not installed]",
-            Style::default().fg(Color::DarkGray),
+            "  Install →",
+            Style::default().fg(Color::Green),
         ));
     }
 
