@@ -311,6 +311,11 @@ fn render_services_content(
             area,
         );
     } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+
         let services = app.snap_services.clone();
         let items: Vec<ListItem> = services.iter().map(service_list_item).collect();
         let list = List::new(items)
@@ -326,7 +331,21 @@ fn render_services_content(
             } else {
                 "▷ "
             });
-        frame.render_stateful_widget(list, area, &mut app.services_state);
+        frame.render_stateful_widget(list, chunks[0], &mut app.services_state);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled("running  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("● ", Style::default().fg(Color::Yellow)),
+                Span::styled("no-boot  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("✗ ", Style::default().fg(Color::Red)),
+                Span::styled("failed  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+                Span::styled("disabled", Style::default().fg(Color::DarkGray)),
+            ])),
+            chunks[1],
+        );
     }
 }
 
