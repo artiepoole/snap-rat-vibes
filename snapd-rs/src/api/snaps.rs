@@ -262,7 +262,7 @@ impl SnapdClient {
         self.post_async(
             &format!("/v2/snaps/{snap_name}"),
             &json!({
-                "action": "install-components",
+                "action": "install",
                 "components": [component],
             }),
         )
@@ -277,7 +277,7 @@ impl SnapdClient {
         self.post_async(
             &format!("/v2/snaps/{snap_name}"),
             &json!({
-                "action": "remove-components",
+                "action": "remove",
                 "components": [component],
             }),
         )
