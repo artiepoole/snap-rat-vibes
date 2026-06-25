@@ -3,7 +3,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::ListItem,
 };
-use snapd_rs::ComponentInfo;
+use snapd_rs_artie::ComponentInfo;
 
 pub(crate) fn component_list_item(component: &ComponentInfo) -> ListItem<'static> {
     let installed = component.install_date.is_some();

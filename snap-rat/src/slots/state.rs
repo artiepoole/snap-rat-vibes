@@ -1,5 +1,5 @@
 use ratatui::widgets::ListState;
-use snapd_rs::api::interfaces::SlotRef;
+use snapd_rs_artie::api::interfaces::SlotRef;
 
 use crate::app::{App, AppMode, ConnectionItem};
 

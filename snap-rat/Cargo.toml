@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 ratatui.workspace = true
 crossterm.workspace = true
-snapd-rs.workspace = true
+snapd-rs-artie.workspace = true
 anyhow.workspace = true
 libc.workspace = true
 tokio.workspace = true

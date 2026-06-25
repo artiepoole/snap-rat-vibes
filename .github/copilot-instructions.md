@@ -2,16 +2,11 @@
 
 ## Project overview
 
-This is a Rust workspace with three crates:
+This is a Rust workspace with one crates:
 
 | Crate | Path | Purpose |
 |---|---|---|
 | `snap-rat` | `snap-rat/` | TUI snap manager (ratatui + crossterm) — the main app |
-| `snapd-rs` | `snapd-rs/` | Async snapd API client (Unix socket via hyper) |
-| `libprompting` | `libprompting/` | Shared prompting utilities |
-
-`snapd-rs` and `app-center` in the repo root are **reference only** — do not treat them as part of snap-rat.
-
 ---
 
 ## snap-rat architecture
@@ -112,16 +107,6 @@ After a successful install, `tick()` calls `queue_auto_connect_prompts(snap_name
 
 ---
 
-## snapd-rs API client
-
-- Communicates over the snapd Unix socket at `/run/snapd.socket`
-- All snap operations live in `snapd-rs/src/api/snaps.rs`
-- Key methods: `install_snap`, `install_snap_classic`, `remove_snap`, `remove_snap_purge`, `refresh_snap`, `revert_snap`, `enable_snap`, `disable_snap`, `list_snaps`, `find_snaps`, `list_connections`, `connect_interface`, `disconnect_interface`, `list_changes`, `get_change`, `abort_change`
-- `remove_snap_purge` sends `{ "action": "remove", "purge": true }` — deletes all snap data
-- Returns `ChangeId` for async operations; poll `/v2/changes/{id}` to track progress
-
----
-
 ## Development workflow
 
 ### Before every commit
@@ -140,10 +125,6 @@ Always include the co-author trailer:
 ```
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 ```
-
-### Active branch
-
-`artie/iface-prompt` (branched from `artie/refactor`)
 
 ---
 

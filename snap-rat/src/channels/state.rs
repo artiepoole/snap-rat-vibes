@@ -1,5 +1,5 @@
 use ratatui::widgets::ListState;
-use snapd_rs::ChannelSnapInfo;
+use snapd_rs_artie::ChannelSnapInfo;
 
 use crate::app::{App, AppMode, ManageAction, channel_sort_key, empty_channel_info};
 

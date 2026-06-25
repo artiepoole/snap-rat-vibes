@@ -3,7 +3,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::ListItem,
 };
-use snapd_rs::AppInfo;
+use snapd_rs_artie::AppInfo;
 
 pub(crate) fn service_list_item(service: &AppInfo) -> ListItem<'static> {
     let active = service.active == Some(true);

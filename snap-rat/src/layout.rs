@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Color,
 };
-use snapd_rs::{ChangeStatus, SnapConfinement};
+use snapd_rs_artie::{ChangeStatus, SnapConfinement};
 
 pub fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
     col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height

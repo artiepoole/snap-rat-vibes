@@ -5,14 +5,7 @@ sdks:
   - name: rust
     channel: latest/stable
   - name: try-build-essential
-  # various options for LLM harnesses
-  - name: opencode
-    channel: latest/stable
   - name: copilot
-    channel: latest/stable
-  - name: claude-code
-    channel: latest/stable
-  - name: codex
     channel: latest/stable
   - name: system
     plugs:
@@ -29,3 +22,6 @@ actions:
   copilot-prompt: copilot --yolo --prompt="$@"
   codex: codex --yolo "$@"
   codex-exec: codex exec --yolo "$@"
+
+# copilot plugin marketplace add DietrichGebert/ponytail
+# copilot plugin install ponytail@ponytail

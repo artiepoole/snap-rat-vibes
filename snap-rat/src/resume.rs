@@ -71,8 +71,8 @@ impl ResumeAction {
 
 /// Returns true if a snapd error means the operation was denied due to
 /// insufficient privileges.
-pub fn is_elevation_needed(e: &snapd_rs::Error) -> bool {
-    if matches!(e, snapd_rs::Error::Io(_) | snapd_rs::Error::Connection(_)) {
+pub fn is_elevation_needed(e: &snapd_rs_artie::Error) -> bool {
+    if matches!(e, snapd_rs_artie::Error::Io(_) | snapd_rs_artie::Error::Connection(_)) {
         return true;
     }
     e.is_kind("login-required")
