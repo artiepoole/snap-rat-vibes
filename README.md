@@ -1,5 +1,9 @@
 # snap-rat-vibes
 
+[![Crates.io](https://img.shields.io/crates/v/snap-rat-vibes.svg)](https://crates.io/crates/snap-rat-vibes)
+[![Documentation](https://docs.rs/snap-rat-vibes/badge.svg)](https://docs.rs/snap-rat-vibes)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 The initial vibe-coded PoC for snap-rat - a Ratatui terminal user interface (TUI) for interacting with the snap store.
 
 See also:
@@ -8,14 +12,22 @@ See also:
 - [snapd-rs-artie](https://github.com/artiepoole/snapd-rs-artie) for the unofficial snapd api bindings used by this
   project (until the official version from Canonical is available)
 
-## snap-rat
+## snap-rat screenshots and highlighs
+Main window:
+<img width="1263" height="801" alt="main installed snap management window" src="https://github.com/user-attachments/assets/38ae8850-e237-454e-bc85-a61fd311e273" />
+Component managment:
+<img width="1047" height="765" alt="compoenents management window for installed snap" src="https://github.com/user-attachments/assets/8a2ed178-d40d-4df2-90d1-ee30159215bf" />
+Channel install options and switch mechanism:
+<img width="1047" height="765" alt="switch channel menu" src="https://github.com/user-attachments/assets/2802288f-f595-4c4f-a3de-97652344292e" />
+Search functionality including hidden snaps (on exact string match):
+<img width="1047" height="765" alt="search window" src="https://github.com/user-attachments/assets/6d48bd1e-74f7-49a3-9a29-abd85b588235" />
+Changes view
+<img width="1047" height="765" alt="changes window" src="https://github.com/user-attachments/assets/c39b7e90-18e7-4894-bbe1-23317bd8df0e" />
+Connections management including between snaps (e.g. content interfaces) and connection prompts on install for non-autoconnections
+<img width="1047" height="765" alt="connections window" src="https://github.com/user-attachments/assets/dc146b57-5ec2-462f-929b-62fa89e035e7" />
+Services management
+<img width="1047" height="765" alt="services window" src="https://github.com/user-attachments/assets/ec3504e0-ece9-473d-a3ed-02b331f9e416" />
 
-<img width="1920" height="1097" alt="image (3)" src="https://github.com/user-attachments/assets/1d7f01f1-8854-4d7f-8815-54fb61a04803" />
-<img width="1920" height="1097" alt="image (2)" src="https://github.com/user-attachments/assets/76c83573-05a1-4982-b394-c20af9fcea90" />
-<img width="1920" height="1097" alt="image (1)" src="https://github.com/user-attachments/assets/f500c79a-4e77-4f38-afa8-7f1ffd7beae9" />
-
-
-<img width="1920" height="1151" alt="image" src="https://github.com/user-attachments/assets/958d968b-c8e3-478d-b126-4dbfbe523b1e" />
 
 ### Build requirements
 
