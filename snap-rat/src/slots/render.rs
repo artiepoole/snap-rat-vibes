@@ -56,6 +56,7 @@ pub(crate) fn render_slot_picker(frame: &mut Frame, app: &mut App) {
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(crate::symbols::play());

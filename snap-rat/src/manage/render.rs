@@ -176,6 +176,7 @@ pub(crate) fn render_manage(frame: &mut Frame, app: &mut App, area: Rect) {
             .highlight_style(
                 Style::default()
                     .bg(Color::DarkGray)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(crate::symbols::play());
@@ -238,6 +239,7 @@ fn render_connections_content(
             .highlight_style(if app.right_pane_focused {
                 Style::default()
                     .bg(Color::DarkGray)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -297,6 +299,7 @@ fn render_components_content(
             .highlight_style(if app.right_pane_focused {
                 Style::default()
                     .bg(Color::DarkGray)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -359,6 +362,7 @@ fn render_services_content(
             .highlight_style(if app.right_pane_focused {
                 Style::default()
                     .bg(Color::DarkGray)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -470,6 +474,7 @@ fn render_service_action_menu(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(crate::symbols::play());

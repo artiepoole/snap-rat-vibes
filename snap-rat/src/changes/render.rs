@@ -58,6 +58,7 @@ pub(crate) fn render_changes_screen(
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(crate::symbols::play());
@@ -165,7 +166,11 @@ pub(crate) fn render_changes_screen(
 
     let tasks = List::new(task_items)
         .block(Block::default().title(" Tasks ").borders(Borders::ALL))
-        .highlight_style(Style::default().bg(Color::DarkGray))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .fg(Color::White)
+        )
         .highlight_symbol(crate::symbols::play());
     frame.render_stateful_widget(tasks, detail_layout[1], &mut app.changes_detail_state);
 

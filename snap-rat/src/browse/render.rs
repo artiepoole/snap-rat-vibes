@@ -150,6 +150,7 @@ pub(crate) fn render_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(if list_active {
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
