@@ -19,3 +19,7 @@ commit.message
 
 # Credentials
 token
+*.key
+
+# sandbox directories
+*sandbox*/**
