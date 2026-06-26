@@ -1,4 +1,4 @@
-use snapd_rs::{SnapConfinement, api::snaps::Snap, api::store::StoreSnap};
+use snapd_rs_artie::{SnapConfinement, api::snaps::Snap, api::store::StoreSnap};
 
 /// Unified view of a snap (installed local or from store search results).
 #[derive(Debug, Clone)]

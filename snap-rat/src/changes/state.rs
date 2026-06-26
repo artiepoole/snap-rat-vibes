@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use snapd_rs::Change;
+use snapd_rs_artie::Change;
 
 use crate::app::App;
 

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use image::DynamicImage;
 use ratatui::{layout::Rect, widgets::ListState};
 use ratatui_image::picker::{Capability, Picker, ProtocolType, cap_parser::QueryStdioOptions};
-use snapd_rs::{
+use snapd_rs_artie::{
     AppInfo, Change, ChannelSnapInfo, ComponentInfo, SnapdClient, StoreSnap,
     api::{
         interfaces::{Connection, Interface, SlotRef},
@@ -653,7 +653,7 @@ impl App {
         self.active_change_action = Some(action.clone());
         self.active_change_snap = Some(name.clone());
 
-        let result: Result<String, snapd_rs::Error> = match &action {
+        let result: Result<String, snapd_rs_artie::Error> = match &action {
             ManageAction::Install => match self.client.install_snap(&name, None).await {
                 Ok(change_id) => {
                     self.active_change_id = Some(change_id.0);

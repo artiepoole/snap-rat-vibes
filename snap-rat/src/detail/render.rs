@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap},
 };
 use ratatui_image::{Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol};
-use snapd_rs::SnapConfinement;
+use snapd_rs_artie::SnapConfinement;
 
 use crate::app::App;
 use crate::layout::{format_size, truncate_text};

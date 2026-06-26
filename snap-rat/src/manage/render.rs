@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
-use snapd_rs::Change;
+use snapd_rs_artie::Change;
 
 use crate::app::{App, AppMode, ManageAction, RightPane};
 use crate::channels::{render_channel_input_in, render_channel_picker_in};
