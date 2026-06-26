@@ -1,4 +1,4 @@
-use crate::app::{App, AppMode, ConfirmPending, ManageAction};
+use crate::app::{App, AppMode, ConfirmPending, ManageAction, ServiceAction};
 
 impl App {
     pub fn request_confirm_action(&mut self, action: ManageAction) {
@@ -47,16 +47,20 @@ impl App {
     }
 
     pub fn cancel_confirm(&mut self) {
+        let return_mode = match &self.confirm_pending {
+            Some(ConfirmPending::ServiceAction { .. })
+            | Some(ConfirmPending::ComponentToggle { .. }) => AppMode::Manage,
+            _ => AppMode::Browse,
+        };
         self.confirm_pending = None;
         self.confirm_message = None;
         self.confirm_hovered = None;
-        // If there are queued auto-connect prompts, drop the current one and show the next.
         if !self.auto_connect_queue.is_empty() {
             self.auto_connect_queue.remove(0);
             self.mode = AppMode::Browse;
             self.pop_auto_connect_prompt();
         } else {
-            self.mode = AppMode::Browse;
+            self.mode = return_mode;
         }
     }
 
@@ -114,6 +118,83 @@ impl App {
                 // Show next prompt if any (after this change completes, the queue
                 // is already drained for this item).
                 self.pop_auto_connect_prompt();
+            }
+            ConfirmPending::ServiceAction {
+                snap_name,
+                service_name,
+                action,
+            } => {
+                self.confirm_hovered = None;
+                self.mode = AppMode::Manage;
+                self.error = None;
+                self.status_message = None;
+                let service_id = format!("{snap_name}.{service_name}");
+                let names = [service_id.as_str()];
+                let result = match action {
+                    ServiceAction::Start => self.client.start_service(&names).await,
+                    ServiceAction::Stop => self.client.stop_service(&names).await,
+                    ServiceAction::Enable => self.client.enable_service(&names).await,
+                    ServiceAction::Disable => self.client.disable_service(&names).await,
+                    ServiceAction::Restart => self.client.restart_service(&names).await,
+                };
+                match result {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some(format!(
+                            "{} service '{service_name}'…",
+                            action
+                                .label()
+                                .split_once("  ")
+                                .map(|(l, _)| l)
+                                .unwrap_or(action.label())
+                        ));
+                    }
+                    Err(ref e) if crate::resume::is_elevation_needed(e) => {
+                        self.try_elevate_and_exec(&snap_name, None);
+                        self.error = Some(result.unwrap_err().to_string());
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
+            }
+            ConfirmPending::ComponentToggle {
+                snap_name,
+                component_name,
+                install,
+            } => {
+                self.confirm_hovered = None;
+                self.mode = AppMode::Manage;
+                self.error = None;
+                self.status_message = None;
+                let result = if install {
+                    self.client
+                        .install_snap_component(&snap_name, &component_name)
+                        .await
+                } else {
+                    self.client
+                        .remove_snap_component(&snap_name, &component_name)
+                        .await
+                };
+                match result {
+                    Ok(change_id) => {
+                        self.active_change_id = Some(change_id.0);
+                        self.active_change = None;
+                        self.status_message = Some(if install {
+                            format!("Installing component '{component_name}'…")
+                        } else {
+                            format!("Removing component '{component_name}'…")
+                        });
+                    }
+                    Err(ref e) if crate::resume::is_elevation_needed(e) => {
+                        self.try_elevate_and_exec(&snap_name, None);
+                        self.error = Some(e.to_string());
+                    }
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                    }
+                }
             }
         }
     }

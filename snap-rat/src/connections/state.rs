@@ -1,7 +1,7 @@
 use ratatui::widgets::ListState;
 use snapd_rs::api::interfaces::SlotRef;
 
-use crate::app::{App, AppMode, ConnectionItem};
+use crate::app::{App, AppMode, ConfirmPending, ConnectionItem, RightPane};
 
 impl App {
     pub fn connections_next(&mut self) {
@@ -55,30 +55,124 @@ impl App {
         self.connections_state.select(Some(i));
     }
 
-    pub fn toggle_connections_mode(&mut self) {
-        self.connections_mode = !self.connections_mode;
-        if self.connections_mode {
-            // Entering connections pane: show ghost arrow on manage, highlight connections
-            self.manage_state
-                .select(Some(self.manage_state.selected().unwrap_or(0)));
-            if self.connections_state.selected().is_none() && !self.connection_items().is_empty() {
-                self.connections_state.select(Some(0));
+    pub fn components_next(&mut self) {
+        let len = self.snap_components.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .components_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.components_state.select(Some(i));
+    }
+
+    pub fn components_prev(&mut self) {
+        let len = self.snap_components.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.components_state.selected() {
+            Some(0) | None => 0,
+            Some(i) => i - 1,
+        };
+        self.components_state.select(Some(i));
+    }
+
+    pub fn services_next(&mut self) {
+        let len = self.snap_services.len();
+        if len == 0 {
+            return;
+        }
+        let i = self
+            .services_state
+            .selected()
+            .map(|i| (i + 1).min(len - 1))
+            .unwrap_or(0);
+        self.services_state.select(Some(i));
+    }
+
+    pub fn services_prev(&mut self) {
+        let len = self.snap_services.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.services_state.selected() {
+            Some(0) | None => 0,
+            Some(i) => i - 1,
+        };
+        self.services_state.select(Some(i));
+    }
+
+    pub fn right_pane_next(&mut self) {
+        match self.active_right_pane {
+            RightPane::None => {}
+            RightPane::Connections => self.connections_next(),
+            RightPane::Components => self.components_next(),
+            RightPane::Services => {
+                if self.service_actions_open {
+                    self.service_action_next();
+                } else {
+                    self.services_next();
+                }
             }
-            self.connections_activated = true;
-        } else {
-            // Returning to manage actions: show ghost arrow on connections, highlight manage
-            self.connections_state
-                .select(Some(self.connections_state.selected().unwrap_or(0)));
-            if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
-                self.manage_state.select(Some(0));
-            }
-            self.manage_activated = true;
         }
     }
 
-    pub fn close_connections_mode(&mut self) {
-        self.connections_mode = false;
-        // Keep connections position as ghost, restore manage highlight
+    pub fn right_pane_prev(&mut self) {
+        match self.active_right_pane {
+            RightPane::None => {}
+            RightPane::Connections => self.connections_prev(),
+            RightPane::Components => self.components_prev(),
+            RightPane::Services => {
+                if self.service_actions_open {
+                    self.service_action_prev();
+                } else {
+                    self.services_prev();
+                }
+            }
+        }
+    }
+
+    pub fn right_pane_page_down(&mut self) {
+        match self.active_right_pane {
+            RightPane::None => {}
+            RightPane::Connections => self.connections_page_down(),
+            RightPane::Components => {
+                for _ in 0..10 {
+                    self.components_next();
+                }
+            }
+            RightPane::Services => {
+                for _ in 0..10 {
+                    self.services_next();
+                }
+            }
+        }
+    }
+
+    pub fn right_pane_page_up(&mut self) {
+        match self.active_right_pane {
+            RightPane::None => {}
+            RightPane::Connections => self.connections_page_up(),
+            RightPane::Components => {
+                for _ in 0..10 {
+                    self.components_prev();
+                }
+            }
+            RightPane::Services => {
+                for _ in 0..10 {
+                    self.services_prev();
+                }
+            }
+        }
+    }
+
+    pub fn close_right_pane_focus(&mut self) {
+        self.right_pane_focused = false;
+        self.active_right_pane = crate::app::RightPane::None;
+        self.close_service_action_menu();
         if self.manage_state.selected().is_none() && !self.manage_actions.is_empty() {
             self.manage_state.select(Some(0));
         }
@@ -95,6 +189,149 @@ impl App {
             return;
         };
         self.request_confirm_connection();
+    }
+
+    pub async fn activate_right_pane_item(&mut self) {
+        match self.active_right_pane {
+            RightPane::None => {}
+            RightPane::Connections => {
+                self.connections_activated = false;
+                self.activate_selected_connection().await;
+            }
+            RightPane::Components => {
+                self.components_activated = false;
+                self.request_confirm_component_toggle();
+            }
+            RightPane::Services => {
+                self.services_activated = false;
+                if self.service_actions_open {
+                    self.confirm_selected_service_action();
+                } else {
+                    self.open_service_action_menu();
+                }
+            }
+        }
+    }
+
+    /// Build the action list for the currently-selected service and open the menu.
+    pub fn open_service_action_menu(&mut self) {
+        let Some(idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(idx) else {
+            return;
+        };
+        let active = service.active == Some(true);
+        // Only treat as explicitly enabled if snapd says so; None means unknown → not enabled.
+        let explicitly_enabled = service.enabled == Some(true);
+        let explicitly_disabled = service.enabled == Some(false);
+
+        let mut actions: Vec<crate::app::ServiceAction> = vec![];
+        if !active {
+            actions.push(crate::app::ServiceAction::Start);
+        }
+        actions.push(crate::app::ServiceAction::Restart);
+        if active {
+            actions.push(crate::app::ServiceAction::Stop);
+        }
+        if !explicitly_enabled {
+            actions.push(crate::app::ServiceAction::Enable);
+        }
+        if explicitly_enabled || (active && !explicitly_disabled) {
+            actions.push(crate::app::ServiceAction::Disable);
+        }
+
+        self.service_actions = actions;
+        self.service_actions_state = ratatui::widgets::ListState::default();
+        self.service_actions_state.select(Some(0));
+        self.service_actions_open = true;
+    }
+
+    pub fn close_service_action_menu(&mut self) {
+        self.service_actions_open = false;
+        self.service_actions = vec![];
+        self.service_actions_state = ratatui::widgets::ListState::default();
+    }
+
+    pub fn service_action_next(&mut self) {
+        let len = self.service_actions.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.service_actions_state.selected() {
+            Some(i) => (i + 1).min(len - 1),
+            None => 0,
+        };
+        self.service_actions_state.select(Some(i));
+    }
+
+    pub fn service_action_prev(&mut self) {
+        let len = self.service_actions.len();
+        if len == 0 {
+            return;
+        }
+        let i = match self.service_actions_state.selected() {
+            Some(0) | None => 0,
+            Some(i) => i - 1,
+        };
+        self.service_actions_state.select(Some(i));
+    }
+
+    pub fn confirm_selected_service_action(&mut self) {
+        let Some(action_idx) = self.service_actions_state.selected() else {
+            return;
+        };
+        let Some(action) = self.service_actions.get(action_idx).cloned() else {
+            return;
+        };
+        let Some(svc_idx) = self.services_state.selected() else {
+            return;
+        };
+        let Some(service) = self.snap_services.get(svc_idx) else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        let service_name = service.name.clone();
+        self.confirm_message = Some(format!(
+            "{} service '{}'?",
+            action
+                .label()
+                .split_once("  ")
+                .map(|(l, _)| l)
+                .unwrap_or(action.label()),
+            service_name
+        ));
+        self.confirm_pending = Some(ConfirmPending::ServiceAction {
+            snap_name,
+            service_name,
+            action,
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
+    }
+
+    pub fn request_confirm_component_toggle(&mut self) {
+        let Some(idx) = self.components_state.selected() else {
+            return;
+        };
+        let Some(component) = self.snap_components.get(idx).cloned() else {
+            return;
+        };
+        let Some(snap_name) = self.managed_snap_name.clone() else {
+            return;
+        };
+        let install = component.install_date.is_none();
+        let verb = if install { "Install" } else { "Remove" };
+        self.confirm_message = Some(format!("{verb} component '{}'?", component.name));
+        self.confirm_pending = Some(ConfirmPending::ComponentToggle {
+            snap_name,
+            component_name: component.name.clone(),
+            install,
+        });
+        self.confirm_hovered = Some(false);
+        self.mode = AppMode::Confirm;
     }
 
     pub async fn connect_selected(&mut self) {

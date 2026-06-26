@@ -7,6 +7,39 @@ use crate::{
     types::{ChangeId, DaemonScope, DaemonType, Revision, SnapConfinement, SnapStatus, SnapType},
 };
 
+/// Deserialize a component revision that may be the string `"unset"` for
+/// components that are available but not yet installed.
+fn deserialize_component_revision<'de, D>(d: D) -> std::result::Result<Option<Revision>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    if s == "unset" {
+        return Ok(None);
+    }
+    let n = if let Some(rest) = s.strip_prefix('x') {
+        rest.parse::<i64>().map(|n| -n)
+    } else {
+        s.parse::<i64>()
+    }
+    .map_err(serde::de::Error::custom)?;
+    Ok(Some(Revision(n)))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ComponentInfo {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub version: Option<String>,
+    /// `None` means the component is available in the store but not installed.
+    #[serde(default, deserialize_with = "deserialize_component_revision")]
+    pub revision: Option<Revision>,
+    pub install_date: Option<String>,
+    pub summary: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct StoreAccount {
@@ -48,6 +81,8 @@ pub struct Snap {
     pub apps: Vec<SnapApp>,
     #[serde(default)]
     pub screenshots: Vec<Screenshot>,
+    #[serde(default)]
+    pub components: Vec<ComponentInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,5 +247,40 @@ impl SnapdClient {
 
     pub async fn set_snap_conf(&self, name: &str, conf: Value) -> Result<ChangeId> {
         self.put(&format!("/v2/snaps/{name}/conf"), &conf).await
+    }
+
+    pub async fn list_snap_components(&self, snap_name: &str) -> Result<Vec<ComponentInfo>> {
+        let snap: Snap = self.get(&format!("/v2/snaps/{snap_name}")).await?;
+        Ok(snap.components)
+    }
+
+    pub async fn install_snap_component(
+        &self,
+        snap_name: &str,
+        component: &str,
+    ) -> Result<ChangeId> {
+        self.post_async(
+            &format!("/v2/snaps/{snap_name}"),
+            &json!({
+                "action": "install",
+                "components": [component],
+            }),
+        )
+        .await
+    }
+
+    pub async fn remove_snap_component(
+        &self,
+        snap_name: &str,
+        component: &str,
+    ) -> Result<ChangeId> {
+        self.post_async(
+            &format!("/v2/snaps/{snap_name}"),
+            &json!({
+                "action": "remove",
+                "components": [component],
+            }),
+        )
+        .await
     }
 }

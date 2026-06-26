@@ -86,12 +86,6 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if !app.search_focused => {
                 app.open_manage();
-                if let Some(snap) = app.selected_snap()
-                    && snap.installed
-                {
-                    let name = snap.name.clone();
-                    app.load_snap_interfaces(&name).await;
-                }
             }
             KeyCode::Esc | KeyCode::Left if app.search_focused => {
                 app.search_focused = false;
@@ -116,42 +110,41 @@ pub(crate) async fn handle(app: &mut App, key: KeyEvent, last_esc: &mut Option<I
             _ => {}
         },
         AppMode::Manage => match key.code {
-            KeyCode::Esc | KeyCode::Char('h') if app.connections_mode => {
-                app.close_connections_mode()
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h')
+                if app.right_pane_focused
+                    && app.active_right_pane == crate::app::RightPane::Services
+                    && app.service_actions_open =>
+            {
+                app.close_service_action_menu();
+            }
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') if app.right_pane_focused => {
+                app.close_right_pane_focus()
             }
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => app.close_manage(),
-            KeyCode::Tab => app.toggle_connections_mode(),
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if app.connections_mode => {
-                app.connections_activated = false;
-                app.activate_selected_connection().await;
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if app.right_pane_focused => {
+                app.activate_right_pane_item().await;
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                 app.manage_activated = false;
                 app.execute_selected_action().await;
             }
-            KeyCode::Down | KeyCode::Char('j') if app.connections_mode => {
-                app.connections_activated = false;
-                app.connections_next()
-            }
+            KeyCode::Down | KeyCode::Char('j') if app.right_pane_focused => app.right_pane_next(),
             KeyCode::Down | KeyCode::Char('j') => {
                 app.manage_activated = false;
                 app.manage_next()
             }
-            KeyCode::Up | KeyCode::Char('k') if app.connections_mode => {
-                app.connections_activated = false;
-                app.connections_prev()
-            }
+            KeyCode::Up | KeyCode::Char('k') if app.right_pane_focused => app.right_pane_prev(),
             KeyCode::Up | KeyCode::Char('k') => {
                 app.manage_activated = false;
                 app.manage_prev()
             }
-            KeyCode::PageDown if app.connections_mode => app.connections_page_down(),
+            KeyCode::PageDown if app.right_pane_focused => app.right_pane_page_down(),
             KeyCode::PageDown => {
                 for _ in 0..10 {
                     app.manage_next();
                 }
             }
-            KeyCode::PageUp if app.connections_mode => app.connections_page_up(),
+            KeyCode::PageUp if app.right_pane_focused => app.right_pane_page_up(),
             KeyCode::PageUp => {
                 for _ in 0..10 {
                     app.manage_prev();

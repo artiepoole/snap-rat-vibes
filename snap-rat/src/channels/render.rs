@@ -1,18 +1,18 @@
 use ratatui::{
     Frame,
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph},
 };
 
 use crate::app::App;
-use crate::layout::{centered_popup, centered_popup_percent, confinement_label};
+use crate::layout::confinement_label;
 
-pub(crate) fn render_channel_picker(frame: &mut Frame, app: &mut App) {
-    let area = frame.area();
-    let popup = centered_popup_percent(70, 60, area);
-    frame.render_widget(Clear, popup);
-    app.channel_picker_area = Some(popup);
+/// Renders the channel picker list into `area` (already inset by the caller).
+pub(crate) fn render_channel_picker_in(frame: &mut Frame, app: &mut App, area: Rect) {
+    frame.render_widget(Clear, area);
+    app.channel_picker_area = Some(area);
 
     let title = app
         .pending_channel_action
@@ -59,7 +59,7 @@ pub(crate) fn render_channel_picker(frame: &mut Frame, app: &mut App) {
             Block::default()
                 .title(format!(" {title} "))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Yellow))
                 .padding(Padding::horizontal(1)),
         )
@@ -70,14 +70,13 @@ pub(crate) fn render_channel_picker(frame: &mut Frame, app: &mut App) {
         )
         .highlight_symbol("▶ ");
 
-    frame.render_stateful_widget(list, popup, &mut app.channel_picker_state);
+    frame.render_stateful_widget(list, area, &mut app.channel_picker_state);
 }
 
-pub(crate) fn render_channel_input(frame: &mut Frame, app: &mut App) {
-    let area = frame.area();
-    let popup = centered_popup(50, 3, area);
-    frame.render_widget(Clear, popup);
-    app.channel_input_area = Some(popup);
+/// Renders the custom channel text input into `area` (already inset by the caller).
+pub(crate) fn render_channel_input_in(frame: &mut Frame, app: &mut App, area: Rect) {
+    frame.render_widget(Clear, area);
+    app.channel_input_area = Some(area);
 
     let action_label = app
         .pending_channel_action
@@ -88,10 +87,10 @@ pub(crate) fn render_channel_input(frame: &mut Frame, app: &mut App) {
     let block = Block::default()
         .title(format!(" {action_label} "))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Yellow))
         .padding(Padding::horizontal(1));
 
     let text = format!("{}█", app.channel_input);
-    frame.render_widget(Paragraph::new(text).block(block), popup);
+    frame.render_widget(Paragraph::new(text).block(block), area);
 }

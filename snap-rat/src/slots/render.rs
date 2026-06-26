@@ -46,7 +46,7 @@ pub(crate) fn render_slot_picker(frame: &mut Frame, app: &mut App) {
             Block::default()
                 .title(format!(" Connect '{interface_name}' to… "))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Cyan))
                 .padding(Padding::horizontal(1)),
         )

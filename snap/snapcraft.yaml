@@ -6,6 +6,7 @@ description: |
   snap-rat is a terminal UI for browsing and managing snaps.
 grade: devel
 confinement: strict
+icon: snap/assets/icon.svg
 plugs:
   snapd:
     interface: snapd-control

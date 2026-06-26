@@ -99,6 +99,15 @@ pub(crate) fn render_confirm(frame: &mut Frame, app: &mut App) {
             | Some(ConfirmPending::Action(ManageAction::UninstallPurge))
             | Some(ConfirmPending::Action(ManageAction::Revert))
             | Some(ConfirmPending::Disconnect)
+            | Some(ConfirmPending::ServiceAction {
+                action: crate::app::ServiceAction::Stop,
+                ..
+            })
+            | Some(ConfirmPending::ServiceAction {
+                action: crate::app::ServiceAction::Disable,
+                ..
+            })
+            | Some(ConfirmPending::ComponentToggle { install: false, .. })
     ) {
         Color::Red
     } else {

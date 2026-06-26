@@ -1,6 +1,6 @@
 use ratatui::widgets::ListState;
 
-use crate::app::{App, AppMode, ManageAction};
+use crate::app::{App, AppMode, ManageAction, RightPane};
 
 impl App {
     pub fn manage_next(&mut self) {
@@ -40,6 +40,9 @@ impl App {
             actions.push(ManageAction::Disable);
             actions.push(ManageAction::Uninstall);
             actions.push(ManageAction::UninstallPurge);
+            actions.push(ManageAction::OpenConnections);
+            actions.push(ManageAction::OpenComponents);
+            actions.push(ManageAction::OpenServices);
         } else if snap.is_local_file {
             actions.push(ManageAction::InstallLocalFile);
         } else {
@@ -59,9 +62,18 @@ impl App {
         self.snap_interfaces.clear();
         self.snap_connections.clear();
         self.interfaces_loading = false;
-        self.connections_mode = false;
+        self.right_pane_focused = false;
+        self.active_right_pane = RightPane::None;
         self.connections_state = ListState::default();
         self.connections_activated = false;
+        self.snap_components.clear();
+        self.components_state = ListState::default();
+        self.components_activated = false;
+        self.components_loading = false;
+        self.snap_services.clear();
+        self.services_state = ListState::default();
+        self.services_activated = false;
+        self.services_loading = false;
         self.mode = AppMode::Manage;
         self.error = None;
         self.status_message = None;
@@ -101,6 +113,44 @@ impl App {
         self.interfaces_loading = false;
     }
 
+    pub async fn load_snap_components(&mut self, snap_name: &str) {
+        self.components_loading = true;
+        self.snap_components.clear();
+        self.components_state = ListState::default();
+        match self.client.list_snap_components(snap_name).await {
+            Ok(components) => {
+                self.snap_components = components;
+            }
+            Err(_) => {
+                self.snap_components.clear();
+            }
+        }
+        if !self.snap_components.is_empty() {
+            self.components_state.select(Some(0));
+            self.components_activated = true;
+        }
+        self.components_loading = false;
+    }
+
+    pub async fn load_snap_services(&mut self, snap_name: &str) {
+        self.services_loading = true;
+        self.snap_services.clear();
+        self.services_state = ListState::default();
+        match self.client.list_snap_services(snap_name).await {
+            Ok(services) => {
+                self.snap_services = services;
+            }
+            Err(_) => {
+                self.snap_services.clear();
+            }
+        }
+        if !self.snap_services.is_empty() {
+            self.services_state.select(Some(0));
+            self.services_activated = true;
+        }
+        self.services_loading = false;
+    }
+
     pub fn close_manage(&mut self) {
         self.mode = AppMode::Browse;
         self.manage_actions.clear();
@@ -117,11 +167,18 @@ impl App {
         self.snap_interfaces.clear();
         self.snap_connections.clear();
         self.interfaces_loading = false;
-        self.connections_mode = false;
+        self.right_pane_focused = false;
+        self.active_right_pane = RightPane::None;
         self.connections_state = ListState::default();
         self.slot_picker_plug = None;
         self.slot_picker_items.clear();
         self.slot_picker_state = ListState::default();
+        self.snap_components.clear();
+        self.components_state = ListState::default();
+        self.components_loading = false;
+        self.snap_services.clear();
+        self.services_state = ListState::default();
+        self.services_loading = false;
     }
     pub fn action_needs_confirm(action: &ManageAction) -> bool {
         matches!(
@@ -143,6 +200,48 @@ impl App {
             Some(a) => a,
             None => return,
         };
+
+        // Pane-opener actions switch the right pane and move focus there.
+        match action {
+            ManageAction::OpenConnections => {
+                self.active_right_pane = RightPane::Connections;
+                self.right_pane_focused = true;
+                self.connections_activated = false;
+                if self.snap_interfaces.is_empty()
+                    && !self.interfaces_loading
+                    && let Some(name) = self.managed_snap_name.clone()
+                {
+                    self.load_snap_interfaces(&name).await;
+                }
+                return;
+            }
+            ManageAction::OpenComponents => {
+                self.active_right_pane = RightPane::Components;
+                self.right_pane_focused = true;
+                self.components_activated = false;
+                if self.snap_components.is_empty()
+                    && !self.components_loading
+                    && let Some(name) = self.managed_snap_name.clone()
+                {
+                    self.load_snap_components(&name).await;
+                }
+                return;
+            }
+            ManageAction::OpenServices => {
+                self.active_right_pane = RightPane::Services;
+                self.right_pane_focused = true;
+                self.services_activated = false;
+                if self.snap_services.is_empty()
+                    && !self.services_loading
+                    && let Some(name) = self.managed_snap_name.clone()
+                {
+                    self.load_snap_services(&name).await;
+                }
+                return;
+            }
+            _ => {}
+        }
+
         if action.needs_channel_input() {
             self.open_channel_picker(action).await;
             return;

@@ -5,7 +5,7 @@ use image::DynamicImage;
 use ratatui::{layout::Rect, widgets::ListState};
 use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
 use snapd_rs::{
-    Change, ChannelSnapInfo, SnapdClient, StoreSnap,
+    AppInfo, Change, ChannelSnapInfo, ComponentInfo, SnapdClient, StoreSnap,
     api::{
         interfaces::{Connection, Interface, SlotRef},
         snaps::Snap,
@@ -13,6 +13,16 @@ use snapd_rs::{
 };
 
 use crate::types::DisplaySnap;
+
+/// Which panel is shown on the right side of the manage pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RightPane {
+    /// No pane selected yet — right side shows a placeholder.
+    None,
+    Connections,
+    Components,
+    Services,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -32,6 +42,28 @@ pub enum AppMode {
 }
 
 /// The action that will execute once the user confirms the `Confirm` dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceAction {
+    Start,
+    Stop,
+    Enable,  // start + mark for auto-start on boot
+    Disable, // stop + remove auto-start on boot
+    Restart,
+}
+
+impl ServiceAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ServiceAction::Start => "Start",
+            ServiceAction::Stop => "Stop",
+            ServiceAction::Enable => "Enable  (start on boot)",
+            ServiceAction::Disable => "Disable  (stop, no auto-start)",
+            ServiceAction::Restart => "Restart",
+        }
+    }
+}
+
+/// The action that will execute once the user confirms the `Confirm` dialog.
 #[derive(Debug, Clone)]
 pub enum ConfirmPending {
     Action(ManageAction),
@@ -43,6 +75,18 @@ pub enum ConfirmPending {
         plug_name: String,
         interface_name: String,
         slot: SlotRef,
+    },
+    /// An action on a specific service (start/stop/enable/disable/restart).
+    ServiceAction {
+        snap_name: String,
+        service_name: String,
+        action: ServiceAction,
+    },
+    /// Install or remove a snap component.
+    ComponentToggle {
+        snap_name: String,
+        component_name: String,
+        install: bool, // true = install, false = remove
     },
 }
 
@@ -77,6 +121,9 @@ pub enum ManageAction {
     Disable,
     Uninstall,
     UninstallPurge,
+    OpenConnections,
+    OpenComponents,
+    OpenServices,
     OpenStorePage,
     OpenContactPage,
 }
@@ -85,15 +132,18 @@ impl ManageAction {
     pub fn label(&self) -> &'static str {
         match self {
             ManageAction::Install => "Install",
-            ManageAction::InstallFromChannel => "Install from channel…",
+            ManageAction::InstallFromChannel => "Install from channel →",
             ManageAction::InstallLocalFile => "Install from local file",
             ManageAction::Refresh => "Refresh to latest",
-            ManageAction::SwitchChannel => "Switch channel…",
+            ManageAction::SwitchChannel => "Switch channel →",
             ManageAction::Revert => "Revert to previous version",
             ManageAction::Enable => "Enable",
             ManageAction::Disable => "Disable",
             ManageAction::Uninstall => "Uninstall",
             ManageAction::UninstallPurge => "Uninstall and purge data",
+            ManageAction::OpenConnections => "Connections →",
+            ManageAction::OpenComponents => "Components →",
+            ManageAction::OpenServices => "Services →",
             ManageAction::OpenStorePage => "Open store page",
             ManageAction::OpenContactPage => "Open contact page",
         }
@@ -139,7 +189,7 @@ pub struct App {
     /// click/keypress to select an item. Used so the pre-selected index 0 doesn't count
     /// as an "already selected" second click.
     pub manage_activated: bool,
-    /// Same sentinel for the connections sub-pane.
+    /// Same sentinel for the right-pane sub-pane.
     pub connections_activated: bool,
     pub active_change_id: Option<String>,
     pub active_change: Option<Change>,
@@ -172,8 +222,25 @@ pub struct App {
     /// connected state because select=all does not populate Plug.connections.
     pub snap_connections: Vec<Connection>,
     pub interfaces_loading: bool,
-    pub connections_mode: bool,
+    /// Whether the right-side pane (connections / components / services) has keyboard focus.
+    pub right_pane_focused: bool,
+    /// Which panel is currently shown on the right side of the manage pane.
+    pub active_right_pane: RightPane,
     pub connections_state: ListState,
+    /// Snap components, populated lazily when the Components right pane is opened.
+    pub snap_components: Vec<ComponentInfo>,
+    pub components_state: ListState,
+    pub components_activated: bool,
+    pub components_loading: bool,
+    /// Snap services (daemon apps), populated lazily when the Services right pane is opened.
+    pub snap_services: Vec<AppInfo>,
+    pub services_state: ListState,
+    pub services_activated: bool,
+    pub services_loading: bool,
+    /// Drill-down action menu shown when a service is selected.
+    pub service_actions_open: bool,
+    pub service_actions: Vec<ServiceAction>,
+    pub service_actions_state: ListState,
     /// Plug being connected — shown in slot picker overlay.
     pub slot_picker_plug: Option<ConnectionItem>,
     /// Available slots to connect to (populated when entering SlotPicker mode).
@@ -205,6 +272,10 @@ pub struct App {
     pub left_pane_area: Option<Rect>,
     /// Inner area of the connections list (border + padding already removed).
     pub connections_inner_area: Option<Rect>,
+    /// Inner area of the components list (border + padding already removed).
+    pub components_inner_area: Option<Rect>,
+    /// Inner area of the services list (border + padding already removed).
+    pub services_inner_area: Option<Rect>,
     pub channel_picker_area: Option<Rect>,
     pub slot_picker_area: Option<Rect>,
     pub channel_input_area: Option<Rect>,
@@ -263,8 +334,20 @@ impl App {
             snap_interfaces: vec![],
             snap_connections: vec![],
             interfaces_loading: false,
-            connections_mode: false,
+            right_pane_focused: false,
+            active_right_pane: RightPane::None,
             connections_state: ListState::default(),
+            snap_components: vec![],
+            components_state: ListState::default(),
+            components_activated: false,
+            components_loading: false,
+            snap_services: vec![],
+            services_state: ListState::default(),
+            services_activated: false,
+            services_loading: false,
+            service_actions_open: false,
+            service_actions: vec![],
+            service_actions_state: ListState::default(),
             slot_picker_plug: None,
             slot_picker_items: vec![],
             slot_picker_state: ListState::default(),
@@ -306,6 +389,8 @@ impl App {
             manage_actions_area: None,
             left_pane_area: None,
             connections_inner_area: None,
+            components_inner_area: None,
+            services_inner_area: None,
             channel_picker_area: None,
             slot_picker_area: None,
             channel_input_area: None,
@@ -668,6 +753,10 @@ impl App {
                 }
                 Ok("Opened contact page")
             }
+            // These are handled by execute_selected_action before reaching here.
+            ManageAction::OpenConnections
+            | ManageAction::OpenComponents
+            | ManageAction::OpenServices => Ok(""),
         };
 
         self.loading = false;
@@ -712,7 +801,11 @@ impl App {
                         snap_name: name.clone(),
                     }),
                     // Non-privileged actions — shouldn't fail with elevation error.
-                    ManageAction::OpenStorePage | ManageAction::OpenContactPage => None,
+                    ManageAction::OpenStorePage
+                    | ManageAction::OpenContactPage
+                    | ManageAction::OpenConnections
+                    | ManageAction::OpenComponents
+                    | ManageAction::OpenServices => None,
                 };
                 self.try_elevate_and_exec(&name, resume_action);
                 // Only reached if already root — show the error normally.
@@ -737,12 +830,23 @@ impl App {
                         let action = self.active_change_action.take();
                         let snap_name = self.active_change_snap.take();
                         let in_connections =
-                            self.connections_mode || self.mode == AppMode::SlotPicker;
+                            self.right_pane_focused || self.mode == AppMode::SlotPicker;
                         if in_connections {
-                            // Connection/disconnect complete — stay in manage panel
-                            // and reload the interfaces so the connected state updates.
+                            // Right-pane operation complete — stay in manage and reload the
+                            // active pane data so the state reflects the change.
                             if let Some(name) = self.selected_snap().map(|s| s.name) {
-                                self.load_snap_interfaces(&name).await;
+                                match self.active_right_pane {
+                                    crate::app::RightPane::None => {}
+                                    crate::app::RightPane::Connections => {
+                                        self.load_snap_interfaces(&name).await;
+                                    }
+                                    crate::app::RightPane::Components => {
+                                        self.load_snap_components(&name).await;
+                                    }
+                                    crate::app::RightPane::Services => {
+                                        self.load_snap_services(&name).await;
+                                    }
+                                }
                             }
                         } else if matches!(
                             self.mode,

@@ -10,7 +10,7 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::ScrollDown => match app.mode {
             AppMode::Browse => app.next(),
-            AppMode::Manage if app.connections_mode => app.connections_next(),
+            AppMode::Manage if app.right_pane_focused => app.right_pane_next(),
             AppMode::Manage => app.manage_next(),
             AppMode::ChannelPicker => app.channel_picker_next(),
             AppMode::SlotPicker => app.slot_picker_next(),
@@ -28,7 +28,7 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
         },
         MouseEventKind::ScrollUp => match app.mode {
             AppMode::Browse => app.prev(),
-            AppMode::Manage if app.connections_mode => app.connections_prev(),
+            AppMode::Manage if app.right_pane_focused => app.right_pane_prev(),
             AppMode::Manage => app.manage_prev(),
             AppMode::ChannelPicker => app.channel_picker_prev(),
             AppMode::SlotPicker => app.slot_picker_prev(),
@@ -177,12 +177,6 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                         if app.list_state.selected() == Some(idx) {
                                             // Second click on already-selected item: open manage.
                                             app.open_manage();
-                                            if let Some(snap) = app.selected_snap()
-                                                && snap.installed
-                                            {
-                                                let name = snap.name.clone();
-                                                app.load_snap_interfaces(&name).await;
-                                            }
                                         } else {
                                             app.list_state.select(Some(idx));
                                             app.search_focused = false;
@@ -198,8 +192,7 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                     if let Some(idx) = list_row_to_index(area, row, offset)
                                         && idx < app.manage_actions.len()
                                     {
-                                        app.connections_mode = false;
-                                        // Keep connections ghost position
+                                        app.right_pane_focused = false;
                                         let already_selected =
                                             app.manage_state.selected() == Some(idx);
                                         app.manage_state.select(Some(idx));
@@ -219,17 +212,50 @@ pub(crate) async fn handle(app: &mut App, mouse: MouseEvent) {
                                     if let Some(idx) = inner_list_row_to_index(inner, row, offset)
                                         && idx < app.connection_items().len()
                                     {
-                                        app.connections_mode = true;
-                                        // Keep manage ghost position
+                                        app.right_pane_focused = true;
                                         let already_selected =
                                             app.connections_state.selected() == Some(idx);
                                         app.connections_state.select(Some(idx));
                                         if already_selected && !app.connections_activated {
-                                            // Second explicit click: activate (with confirm)
                                             app.activate_selected_connection().await;
                                         } else {
-                                            // First click: just select
                                             app.connections_activated = false;
+                                            app.manage_activated = false;
+                                        }
+                                    }
+                                } else if let Some(inner) = app.components_inner_area
+                                    && rect_contains(inner, col, row)
+                                {
+                                    let offset = app.components_state.offset();
+                                    if let Some(idx) = inner_list_row_to_index(inner, row, offset)
+                                        && idx < app.snap_components.len()
+                                    {
+                                        app.right_pane_focused = true;
+                                        let already_selected =
+                                            app.components_state.selected() == Some(idx);
+                                        app.components_state.select(Some(idx));
+                                        if already_selected && !app.components_activated {
+                                            app.request_confirm_component_toggle();
+                                        } else {
+                                            app.components_activated = false;
+                                            app.manage_activated = false;
+                                        }
+                                    }
+                                } else if let Some(inner) = app.services_inner_area
+                                    && rect_contains(inner, col, row)
+                                {
+                                    let offset = app.services_state.offset();
+                                    if let Some(idx) = inner_list_row_to_index(inner, row, offset)
+                                        && idx < app.snap_services.len()
+                                    {
+                                        app.right_pane_focused = true;
+                                        let already_selected =
+                                            app.services_state.selected() == Some(idx);
+                                        app.services_state.select(Some(idx));
+                                        if already_selected && !app.services_activated {
+                                            app.open_service_action_menu();
+                                        } else {
+                                            app.services_activated = false;
                                             app.manage_activated = false;
                                         }
                                     }
