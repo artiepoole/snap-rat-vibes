@@ -1,6 +1,6 @@
 # snap-rat-vibes
 
-The initial vibe-cded PoC for snap-rat - a Ratatui terminal user interface (TUI) for interacting with the snap store.
+The initial vibe-coded PoC for snap-rat - a Ratatui terminal user interface (TUI) for interacting with the snap store.
 
 See also:
 
@@ -29,6 +29,23 @@ sudo apt install libchafa-dev
 On terminals that support Kitty, Sixel, or iTerm2 graphics, snap-rat uses those protocols for icon rendering. On other
 terminals (including Linux VTs and minimal/ASCII terminals), it falls back to chafa's character-art renderer, which
 selects the best-fitting character and colour for each cell — no runtime `.so` dependency needed.
+
+#### Build and run with snapcraft
+build:
+```
+snapcraft pack
+```
+install:
+```
+sudo snap install snap-rat-vibes*.snap --dangerous
+sudo snap connect snap-rat-vibes:snapd
+```
+use:
+```
+sudo snap-rat-vibes
+```
+
+**note**: `sudo` is only necessary for write operations like "install", browsing can be done without sudo. If you run the application without root permissions and try to do something which requires them, snap-rat will attempt to escalate and re-exec, but may not be the most seamless behaviour. There be dragons. 
 
 ## setup
 

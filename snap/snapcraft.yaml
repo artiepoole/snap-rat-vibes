@@ -1,9 +1,10 @@
-name: snap-rat
+name: snap-rat-vibes
 base: core24
-version: "0.1.0"
-summary: Terminal UI snap manager
+version: git
+adopt-info: snap-rat-bin
+summary: Terminal UI snap manager and store page
 description: |
-  snap-rat is a terminal UI for browsing and managing snaps.
+  snap-rat is a Ratatui based terminal UI for browsing and managing snaps.
 grade: devel
 confinement: strict
 icon: snap/assets/icon.svg
@@ -11,8 +12,8 @@ plugs:
   snapd:
     interface: snapd-control
 apps:
-  snap-rat:
-    command: bin/snap-rat
+  snap-rat-vibes:
+    command: bin/snap-rat-vibes
     plugs:
       - snapd
       - home
@@ -23,3 +24,14 @@ parts:
     rust-path:
       - snap-rat
     rust-channel: 'stable'
+    build-packages:
+      - libglib2.0-dev
+      - libchafa-dev
+      - pkg-config
+      - libsysprof-capture-4-dev
+    build-snaps:
+      - jq
+    override-pull: |
+      craftctl default
+      cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r .packages[0].version)
+      craftctl set version="$cargo_version+git$(date +'%Y%m%d').$(git describe --always --exclude '*')"
