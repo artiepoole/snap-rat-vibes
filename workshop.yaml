@@ -4,24 +4,10 @@ sdks:
   # for rust bindings
   - name: rust
     channel: latest/stable
-  - name: try-build-essential
   - name: copilot
     channel: latest/stable
-  - name: system
-    plugs:
-      lemonade: # local lemonade-server instance
-        interface: tunnel
-        endpoint: localhost:13305
 actions:
-  snapcraft: snapcraft
-  # various options for LLM harnesses
-  opencode: opencode "$@"
-  claude: claude --dangerously-skip-permissions "$@"
-  claude-prompt: claude --dangerously-skip-permissions -p "$@"
   copilot: copilot --yolo "$@"
-  copilot-prompt: copilot --yolo --prompt="$@"
-  codex: codex --yolo "$@"
-  codex-exec: codex exec --yolo "$@"
 
 # copilot plugin marketplace add DietrichGebert/ponytail
 # copilot plugin install ponytail@ponytail
