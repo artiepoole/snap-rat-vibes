@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Ratatui Based TUI snap manager and snap store front-end"
 license = "GPL-3.0"
 repository = "https://github.com/artiepoole/snap-rat-vibes"
+readme = "README.md"
 keywords = ["snapd", "snap", "tui", "terminal", "ratatui"]
 categories = ["command-line-utilities"]
 
