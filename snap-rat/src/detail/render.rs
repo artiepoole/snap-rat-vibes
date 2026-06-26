@@ -168,20 +168,33 @@ pub(crate) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let help = if app.search_focused {
         " Enter  confirm   Esc  cancel "
     } else {
-        " ↑↓←→  navigate   ↵  confirm   Esc  back   ?/F1  help   q  quit "
+        return render_status_bar_with_help(
+            frame,
+            app,
+            area,
+            &format!(
+                " {}   Esc  back   ?/F1  help   q  quit ",
+                crate::symbols::nav_hint()
+            ),
+            style,
+        );
     };
+    render_status_bar_with_help(frame, app, area, help, style);
+}
 
+fn render_status_bar_with_help(frame: &mut Frame, app: &App, area: Rect, help: &str, style: Style) {
     let indicator = if app.loading {
         Span::styled(
-            " Loading… ",
+            format!(" Loading{} ", crate::symbols::ellipsis()),
             Style::default().bg(Color::Yellow).fg(Color::Black),
         )
     } else if let Some(err) = &app.error {
         Span::styled(
-            format!(" ✗ {err} "),
+            format!(" {} {err} ", crate::symbols::error_sym()),
             Style::default().bg(Color::Red).fg(Color::White),
         )
     } else if app.active_change_id.is_some() {
+        let working = format!("Working{}", crate::symbols::ellipsis());
         let message = app
             .status_message
             .as_deref()
@@ -190,14 +203,21 @@ pub(crate) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                     .as_ref()
                     .map(|change| change.summary.as_str())
             })
-            .unwrap_or("Working…");
+            .unwrap_or(working.as_str());
         Span::styled(
-            format!(" ⟳ {message} "),
+            format!(
+                " {} {message} ",
+                if crate::symbols::is_unicode() {
+                    "⟳"
+                } else {
+                    "*"
+                }
+            ),
             Style::default().bg(Color::Blue).fg(Color::White),
         )
     } else if let Some(msg) = &app.status_message {
         Span::styled(
-            format!(" ✓ {msg} "),
+            format!(" {} {msg} ", crate::symbols::ok_sym()),
             Style::default().bg(Color::Green).fg(Color::Black),
         )
     } else {

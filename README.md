@@ -15,6 +15,16 @@ In <img width="1920" height="1097" alt="image (3)" src="https://github.com/user-
 
 <img width="1920" height="1151" alt="image" src="https://github.com/user-attachments/assets/958d968b-c8e3-478d-b126-4dbfbe523b1e" />
 
+### Build requirements
+
+snap-rat statically links [libchafa](https://hpjansson.org/chafa/) for rich terminal image rendering. Install the development package before building:
+
+```
+sudo apt install libchafa-dev
+```
+
+On terminals that support Kitty, Sixel, or iTerm2 graphics, snap-rat uses those protocols for icon rendering. On other terminals (including Linux VTs and minimal/ASCII terminals), it falls back to chafa's character-art renderer, which selects the best-fitting character and colour for each cell — no runtime `.so` dependency needed.
+
 
 ## setup
 For megademo.ai. The agent has access to snapd source, so please use

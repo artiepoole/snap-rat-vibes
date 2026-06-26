@@ -28,7 +28,14 @@ pub(crate) fn render_classic_confirm(frame: &mut Frame, app: &mut App) {
         .unwrap_or("this snap");
 
     let block = Block::default()
-        .title(" ⚠  Classic Confinement ")
+        .title(format!(
+            " {}  Classic Confinement ",
+            if crate::symbols::is_unicode() {
+                "⚠"
+            } else {
+                "!"
+            }
+        ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Yellow))
@@ -55,8 +62,8 @@ pub(crate) fn render_classic_confirm(frame: &mut Frame, app: &mut App) {
         .split(inner);
     let btn_row = chunks[1];
 
-    let yes_label = "  [ ✔ Install ]  ";
-    let no_label = "  [ ✘ Cancel ]  ";
+    let yes_label = format!("  [ {} Install ]  ", crate::symbols::check());
+    let no_label = format!("  [ {} Cancel ]  ", crate::symbols::error_sym());
     let yes_w = yes_label.chars().count() as u16;
     let no_w = no_label.chars().count() as u16;
     app.confirm_yes_area = Some(Rect::new(btn_row.x, btn_row.y, yes_w, 1));
@@ -115,7 +122,14 @@ pub(crate) fn render_confirm(frame: &mut Frame, app: &mut App) {
     };
 
     let block = Block::default()
-        .title(" ⚠  Confirm ")
+        .title(format!(
+            " {}  Confirm ",
+            if crate::symbols::is_unicode() {
+                "⚠"
+            } else {
+                "!"
+            }
+        ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
@@ -131,8 +145,8 @@ pub(crate) fn render_confirm(frame: &mut Frame, app: &mut App) {
         .split(inner);
     let btn_row = chunks[1];
 
-    let yes_label = "  [ ✔ Confirm ]  ";
-    let no_label = "  [ ✘ Cancel ]  ";
+    let yes_label = format!("  [ {} Confirm ]  ", crate::symbols::check());
+    let no_label = format!("  [ {} Cancel ]  ", crate::symbols::error_sym());
     let yes_w = yes_label.chars().count() as u16;
     let no_w = no_label.chars().count() as u16;
     app.confirm_yes_area = Some(Rect::new(btn_row.x, btn_row.y, yes_w, 1));

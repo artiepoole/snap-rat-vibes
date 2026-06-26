@@ -8,9 +8,12 @@ use snapd_rs::ComponentInfo;
 pub(crate) fn component_list_item(component: &ComponentInfo) -> ListItem<'static> {
     let installed = component.install_date.is_some();
     let marker = if installed {
-        Span::styled("● ", Style::default().fg(Color::Green))
+        Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green))
     } else {
-        Span::styled("○ ", Style::default().fg(Color::DarkGray))
+        Span::styled(
+            crate::symbols::dot_off(),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
     let mut spans = vec![
@@ -43,10 +46,13 @@ pub(crate) fn component_list_item(component: &ComponentInfo) -> ListItem<'static
 
     // Action hint at the end.
     if installed {
-        spans.push(Span::styled("  Remove →", Style::default().fg(Color::Red)));
+        spans.push(Span::styled(
+            format!("  Remove {}", crate::symbols::arrow()),
+            Style::default().fg(Color::Red),
+        ));
     } else {
         spans.push(Span::styled(
-            "  Install →",
+            format!("  Install {}", crate::symbols::arrow()),
             Style::default().fg(Color::Green),
         ));
     }

@@ -294,13 +294,13 @@ impl App {
             return;
         };
         let service_name = service.name.clone();
+        let action_label = action.label();
         self.confirm_message = Some(format!(
             "{} service '{}'?",
-            action
-                .label()
+            action_label
                 .split_once("  ")
                 .map(|(l, _)| l)
-                .unwrap_or(action.label()),
+                .unwrap_or(action_label.as_str()),
             service_name
         ));
         self.confirm_pending = Some(ConfirmPending::ServiceAction {
@@ -421,7 +421,7 @@ impl App {
             Ok(change_id) => {
                 self.active_change_id = Some(change_id.0);
                 self.active_change = None;
-                self.status_message = Some("Disconnecting…".to_string());
+                self.status_message = Some(format!("Disconnecting{}", crate::symbols::ellipsis()));
             }
             Err(ref e) if crate::resume::is_elevation_needed(e) => {
                 // For connect/disconnect, just restore position — user can redo.

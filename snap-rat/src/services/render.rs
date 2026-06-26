@@ -14,25 +14,28 @@ pub(crate) fn service_list_item(service: &AppInfo) -> ListItem<'static> {
     let (marker, name_color, status_span) = match (active, explicitly_enabled) {
         // Running and enabled — healthy.
         (true, true) => (
-            Span::styled("● ", Style::default().fg(Color::Green)),
+            Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Green)),
             Color::White,
             Span::styled("  running", Style::default().fg(Color::Green)),
         ),
         // Running but disabled — will stop on next reboot.
         (true, false) => (
-            Span::styled("● ", Style::default().fg(Color::Yellow)),
+            Span::styled(crate::symbols::dot_on(), Style::default().fg(Color::Yellow)),
             Color::White,
             Span::styled("  running (disabled)", Style::default().fg(Color::Yellow)),
         ),
         // Stopped but enabled — likely failed or crashed.
         (false, true) => (
-            Span::styled("✗ ", Style::default().fg(Color::Red)),
+            Span::styled(crate::symbols::dot_err(), Style::default().fg(Color::Red)),
             Color::Red,
             Span::styled("  stopped", Style::default().fg(Color::Red)),
         ),
         // Stopped and disabled — intentionally off.
         (false, false) => (
-            Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                crate::symbols::dot_off(),
+                Style::default().fg(Color::DarkGray),
+            ),
             Color::DarkGray,
             Span::styled("  stopped (disabled)", Style::default().fg(Color::DarkGray)),
         ),
