@@ -66,6 +66,7 @@ pub(crate) fn render_channel_picker_in(frame: &mut Frame, app: &mut App, area: R
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(crate::symbols::play());
