@@ -12,6 +12,10 @@ See also:
 - [snapd-rs-artie](https://github.com/artiepoole/snapd-rs-artie) for the unofficial snapd api bindings used by this
   project (until the official version from Canonical is available)
 
+## Demo
+
+[![asciicast](https://asciinema.org/a/1261506.svg)](https://asciinema.org/a/1261506)
+
 ## snap-rat screenshots and highlighs
 Main window:
 <img width="1263" height="801" alt="main installed snap management window" src="https://github.com/user-attachments/assets/38ae8850-e237-454e-bc85-a61fd311e273" />
