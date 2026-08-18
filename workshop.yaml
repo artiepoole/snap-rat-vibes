@@ -4,10 +4,8 @@ sdks:
   # for rust bindings
   - name: rust
     channel: latest/stable
-  - name: copilot
+  - name: opencode
     channel: latest/stable
-actions:
-  copilot: copilot --yolo "$@"
 
 # copilot plugin marketplace add DietrichGebert/ponytail
 # copilot plugin install ponytail@ponytail

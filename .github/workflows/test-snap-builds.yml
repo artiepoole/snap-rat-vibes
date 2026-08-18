@@ -1,0 +1,57 @@
+name: Test snap builds
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: test-snap-builds-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  snap-build:
+    name: Check Snap Builds (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # snapcraft.yaml derives the snap version with `git describe`, so the
+          # build needs the git metadata, not just a shallow snapshot.
+          fetch-depth: 0
+      - uses: canonical/action-build@v1.3.0
+        id: snapcraft
+      - name: Inspect built snap
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SNAP_FILE="${{ steps.snapcraft.outputs.snap }}"
+
+          echo "::group::Listing snap files"
+          find . -maxdepth 1 -name "*.snap" -type f
+          echo "::endgroup::"
+
+          if [[ -z "${SNAP_FILE}" || ! -f "${SNAP_FILE}" ]]; then
+            echo "::error::snapcraft did not produce a snap file."
+            exit 1
+          fi
+
+          echo "::group::Snap contents"
+          unsquashfs -l "${SNAP_FILE}" | tee unsquashfs.log
+          echo "::endgroup::"
+
+          # The app entry in snapcraft.yaml points at bin/snap-rat-vibes, so a
+          # snap without it would install but fail to launch.
+          if ! grep -qE "squashfs-root/bin/snap-rat-vibes$" unsquashfs.log; then
+            echo "::error::bin/snap-rat-vibes is missing from ${SNAP_FILE}."
+            exit 1
+          fi
+
+          echo "✅ Built ${SNAP_FILE} containing bin/snap-rat-vibes."
